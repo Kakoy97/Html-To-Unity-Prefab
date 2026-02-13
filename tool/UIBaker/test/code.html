@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Auction Results: Winners Board 2</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+<link href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#3BC9DB", // Cyan
+                        secondary: "#FF4D4D", // Red
+                        accent: "#A3E635", // Lime Green
+                        "dark-bg": "#0F172A",
+                        "retro-black": "#1A1A1A",
+                        "retro-yellow": "#FCD34D",
+                        "arcade-gold": "#FFC107", // Rich Golden Yellow
+                        "cream-white": "#FFFDD0", // Off-white/cream
+                        "warm-tan": "#D2B48C", // Warm Tan
+                        "sky-blue": "#38BDF8", // Vibrant Sky Blue
+                        "silver-frame": "#C0C0C0", // Silver Gray
+                        "paper-white": "#FDFBF7",
+                        "retro-gray": "#E5E7EB",
+                    },
+                    fontFamily: {
+                        display: ["'VT323'", "monospace"],
+                    },
+                    boxShadow: {
+                        'retro': '4px 4px 0px 0px rgba(0,0,0,1)',
+                        'retro-sm': '2px 2px 0px 0px rgba(0,0,0,1)',
+                        'retro-lg': '6px 6px 0px 0px rgba(0,0,0,1)',
+                        'retro-inset': 'inset 2px 2px 0px 0px rgba(0,0,0,0.2)',
+                    },
+                    borderWidth: {
+                        '3': '3px',
+                    }
+                },
+            },
+        };
+    </script>
+<style>.bg-pixel-pattern {
+    background-image: linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0
+    }
+.dark .bg-pixel-pattern {
+    background-image: linear-gradient(45deg, #333 25%, transparent 25%), linear-gradient(-45deg, #333 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #333 75%), linear-gradient(-45deg, transparent 75%, #333 75%)
+    }
+.scanlines {
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.1) 50%, rgba(0, 0, 0, 0.1));
+    background-size: 100% 4px;
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10
+    }
+.paper-texture {
+    background-color: #fdfbf7;
+    background-image: url(https://lh3.googleusercontent.com/aida-public/AB6AXuBhCf-gL6HXDwlNZc6QU3Hrmo_4Io2d5drBIqkwY2_FhUOw4yI1ihDj3z8h4oFJshOfcN-8QcD-pfXQAY6CbWMrQZtDWdan13Qx1pkpXaaTzVHFnK8HnNQaHTrpVmObuWRSoZE-Bw8MlkZLoV6Z0ArVqxLHPIWvTneoRBLyGJuF70Ob_mgXuC4wV-O1huEPzaHtyTq3srZroCbA5Mrdl8SOouOt4nikH2cZZ85D3_878I6-W44jmdotlm9SGNCV0eI4VhyoBsQHAjg)
+    }
+.dark .paper-texture {
+    background-color: #e5e5e5
+    }
+.tape {
+    background-color: rgba(255, 255, 255, 0.4);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(2px);
+    transform: rotate(-2deg);
+    border: 1px solid rgba(255, 255, 255, 0.2)
+    }
+.lcd-font {
+    font-family: "Courier New", Courier, monospace;
+    letter-spacing: 2px
+    }
+.dither-bg {
+    background-image: radial-gradient(#000 1px, transparent 1px);
+    background-size: 4px 4px
+    }</style>
+<style>
+        body {
+            min-height: max(884px, 100dvh);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-gray-200 dark:bg-gray-900 font-display antialiased min-h-screen flex justify-center items-center p-4">
+<div class="w-full max-w-md bg-retro-black border-4 border-black dark:border-gray-700 shadow-2xl relative overflow-hidden rounded-2xl mx-auto min-h-[800px] flex flex-col">
+<div class="scanlines opacity-20 pointer-events-none"></div>
+<div class="bg-primary p-4 border-b-4 border-black relative z-20 opacity-50 blur-[1px]">
+<div class="absolute top-2 left-4 opacity-50 pointer-events-none">
+<svg fill="white" height="30" viewBox="0 0 60 30" width="60">
+<rect height="10" width="40" x="10" y="10"></rect>
+<rect height="10" width="20" x="20" y="0"></rect>
+<rect height="10" width="20" x="20" y="20"></rect>
+<rect height="10" width="10" x="0" y="10"></rect>
+<rect height="10" width="10" x="50" y="10"></rect>
+</svg>
+</div>
+<div class="flex items-center justify-between mt-6">
+<button class="bg-white border-2 border-black p-2 shadow-retro mr-2">
+<span class="material-symbols-outlined text-black text-2xl">chat_bubble</span>
+</button>
+<div class="flex space-x-3 overflow-x-auto pb-1 flex-1 justify-end">
+<div class="flex flex-col items-center">
+<div class="w-12 h-12 bg-yellow-300 border-2 border-black mb-1 flex items-center justify-center relative shadow-retro-sm">
+<span class="material-symbols-outlined text-black">face</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="bg-accent flex-1 p-4 relative flex flex-col opacity-50 blur-[1px]">
+<div class="grid grid-cols-3 gap-3 h-full items-start mt-2">
+<div class="paper-texture relative p-2 h-48 border border-gray-300"></div>
+<div class="paper-texture relative p-2 h-48 border border-gray-300"></div>
+<div class="paper-texture relative p-2 h-48 border border-gray-300"></div>
+</div>
+</div>
+<div class="absolute inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4 backdrop-blur-sm">
+<div class="w-full bg-retro-black border-4 border-black shadow-retro-lg relative flex flex-col max-w-[340px]">
+<div class="bg-primary border-b-4 border-black p-3 flex justify-between items-center relative">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-black">gavel</span>
+<span class="text-black font-bold text-xl tracking-wide">RESULTS</span>
+</div>
+<div class="bg-black text-white px-2 py-0.5 text-sm font-bold border-2 border-white/50">ROUND 3/5</div>
+</div>
+<div class="p-5 bg-retro-black flex flex-col items-center relative">
+<div class="bg-warm-tan w-full border-4 border-black shadow-retro p-1 relative mb-6">
+<div class="absolute -top-4 left-4 bg-warm-tan border-t-4 border-l-4 border-r-4 border-black h-5 w-24 z-10"></div>
+<div class="bg-paper-texture border-2 border-[#8D6E63] p-3 h-full flex flex-col space-y-4">
+<div class="border-b-2 border-dashed border-[#8D6E63] pb-2 text-center">
+<h2 class="text-2xl font-black text-[#3E2723] uppercase tracking-widest">DOSSIER #804</h2>
+</div>
+<div class="flex items-center justify-between bg-white/50 border-2 border-[#8D6E63] p-2 relative">
+<div class="absolute -left-3 top-1/2 transform -translate-y-1/2 bg-sky-blue border-2 border-black w-6 h-6 flex items-center justify-center shadow-retro-sm z-20">
+<span class="material-symbols-outlined text-black text-sm font-bold">visibility_off</span>
+</div>
+<div class="pl-4 flex-1">
+<div class="text-xs font-bold text-[#5D4037] uppercase tracking-wider">INSIDER</div>
+<div class="text-sm text-[#3E2723] font-bold">Sold for: <span class="text-red-600">$5,200</span></div>
+</div>
+<div class="relative">
+<div class="w-10 h-10 bg-yellow-300 border-4 border-arcade-gold shadow-sm flex items-center justify-center relative overflow-hidden">
+<span class="material-symbols-outlined text-black text-xl">face</span>
+<div class="absolute inset-0 border-2 border-yellow-100 opacity-50"></div>
+</div>
+<div class="absolute -bottom-2 -right-2 bg-arcade-gold border border-black px-1 text-[10px] font-bold text-black shadow-sm rotate-[-5deg]">YOU</div>
+</div>
+</div>
+<div class="flex items-center justify-between bg-white/50 border-2 border-[#8D6E63] p-2 relative">
+<div class="absolute -left-3 top-1/2 transform -translate-y-1/2 bg-secondary border-2 border-black w-6 h-6 flex items-center justify-center shadow-retro-sm z-20">
+<span class="material-symbols-outlined text-black text-sm font-bold">public</span>
+</div>
+<div class="pl-4 flex-1">
+<div class="text-xs font-bold text-[#5D4037] uppercase tracking-wider">PUBLIC</div>
+<div class="text-sm text-[#3E2723] font-bold">Sold for: <span class="text-black">$1,800</span></div>
+</div>
+<div class="relative">
+<div class="w-10 h-10 bg-gray-300 border-4 border-gray-500 shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-gray-600 text-xl">smart_toy</span>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-between bg-white/50 border-2 border-[#8D6E63] p-2 relative">
+<div class="absolute -left-3 top-1/2 transform -translate-y-1/2 bg-accent border-2 border-black w-6 h-6 flex items-center justify-center shadow-retro-sm z-20">
+<span class="material-symbols-outlined text-black text-sm font-bold">campaign</span>
+</div>
+<div class="pl-4 flex-1">
+<div class="text-xs font-bold text-[#5D4037] uppercase tracking-wider">RUMORS</div>
+<div class="text-sm text-[#3E2723] font-bold">Sold for: <span class="text-black">$850</span></div>
+</div>
+<div class="relative">
+<div class="w-10 h-10 bg-purple-300 border-4 border-purple-500 shadow-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-purple-800 text-xl">smart_toy</span>
+</div>
+</div>
+</div>
+<div class="absolute bottom-2 right-2 transform -rotate-12 opacity-80 pointer-events-none">
+<div class="border-4 border-red-600 text-red-600 px-2 py-1 font-black text-xl uppercase tracking-widest" style="mask-image: url('data:image/svg+xml;utf8,&lt;svg ...&gt;...&lt;/svg&gt;'); -webkit-mask-image: linear-gradient(black, black);">
+                                    CLOSED
+                                </div>
+</div>
+</div>
+</div>
+<button class="w-full bg-accent border-4 border-black py-4 px-6 shadow-retro active:shadow-retro-sm active:translate-x-[2px] active:translate-y-[2px] transition-all group relative overflow-hidden">
+<div class="absolute inset-0 bg-white opacity-0 group-hover:opacity-20 transition-opacity"></div>
+<div class="flex items-center justify-center space-x-2">
+<span class="text-4xl font-black text-black tracking-widest">OK</span>
+</div>
+</button>
+</div>
+<div class="h-4 bg-primary border-t-4 border-black flex items-center justify-center space-x-1 overflow-hidden">
+<div class="w-full h-full dither-bg opacity-20"></div>
+</div>
+</div>
+</div>
+</div>
+</body></html>

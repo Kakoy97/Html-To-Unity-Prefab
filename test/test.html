@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Transaction: Withdraw &amp; Deposit 1</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=VT323&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet"/>
+<script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#3BC9DB", // Cyan
+                        secondary: "#FF4D4D", // Red
+                        accent: "#A3E635", // Retro Lime Green
+                        "solid-lime": "#95D53B", // Solid vibrant lime
+                        "dark-bg": "#0F172A",
+                        "retro-black": "#1A1A1A",
+                        "retro-yellow": "#FCD34D",
+                        "retro-gray": "#2D3748",
+                        "charcoal": "#262626", // Dark charcoal for modal
+                        "modal-lime": "#84CC16", // Lime green for confirm button
+                    },
+                    fontFamily: {
+                        display: ["'VT323'", "monospace"],
+                    },
+                    boxShadow: {
+                        'retro': '4px 4px 0px 0px rgba(0,0,0,1)',
+                        'retro-sm': '2px 2px 0px 0px rgba(0,0,0,1)',
+                        'retro-lg': '6px 6px 0px 0px rgba(0,0,0,1)',
+                    },
+                },
+            },
+        };
+    </script>
+<style>
+        .scanlines {
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.1) 50%, rgba(0, 0, 0, 0.1));
+            background-size: 100% 4px;
+            pointer-events: none;
+            position: absolute;
+            inset: 0;
+            z-index: 50;
+        }
+        .shutter-pattern {
+            background-image: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0.05) 0px,
+                rgba(0, 0, 0, 0.05) 4px,
+                transparent 4px,
+                transparent 8px
+            );
+        }
+        body {
+            min-height: max(884px, 100dvh);
+        }input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 24px;
+            width: 16px;
+            border-radius: 0;
+            background: #A3E635;
+            cursor: pointer;
+            border: 2px solid black;
+            box-shadow: 2px 2px 0px 0px rgba(0,0,0,1);
+            margin-top: -8px;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 8px;
+            cursor: pointer;
+            background: #4B5563;
+            border: 2px solid black;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-gray-200 dark:bg-gray-900 font-display antialiased min-h-screen flex justify-center items-center p-4">
+<div class="w-full max-w-md bg-retro-black border-4 border-black shadow-2xl relative overflow-hidden rounded-2xl mx-auto min-h-[800px] flex flex-col">
+<div class="scanlines opacity-20"></div>
+<div class="absolute inset-0 z-[60] bg-black bg-opacity-70 flex items-center justify-center p-6">
+<div class="w-full bg-charcoal border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,0.5)]">
+<div class="bg-primary border-b-4 border-black flex">
+<button class="flex-1 py-3 px-2 border-r-4 border-black bg-retro-black text-primary hover:bg-black transition-colors relative group">
+<span class="text-2xl font-bold tracking-widest uppercase">WITHDRAW</span>
+<div class="absolute inset-0 bg-black opacity-30 group-hover:opacity-10 pointer-events-none"></div>
+</button>
+<button class="flex-1 py-3 px-2 bg-primary text-black relative">
+<span class="text-2xl font-bold tracking-widest uppercase drop-shadow-[1px_1px_0_rgba(255,255,255,0.5)]">DEPOSIT</span>
+<div class="absolute bottom-1 left-0 right-0 flex justify-center gap-1">
+<div class="w-1.5 h-1.5 bg-black"></div>
+<div class="w-1.5 h-1.5 bg-black"></div>
+<div class="w-1.5 h-1.5 bg-black"></div>
+</div>
+</button>
+</div>
+<div class="bg-retro-black border-b-4 border-black p-3 text-center">
+<p class="text-retro-yellow text-xl tracking-wider">AVAILABLE FUNDS: <span class="font-bold">$50,000</span></p>
+</div>
+<div class="p-6 space-y-6">
+<div class="relative">
+<label class="block text-gray-400 text-lg mb-2 uppercase tracking-wide">Amount</label>
+<div class="flex items-center">
+<span class="bg-gray-700 border-t-4 border-l-4 border-b-4 border-black text-white text-2xl py-3 px-4 font-bold">$</span>
+<input class="w-full bg-white border-4 border-black py-3 px-4 text-black text-3xl font-bold font-display focus:ring-0 focus:border-black focus:bg-yellow-50 placeholder-gray-300" placeholder="0.00" type="text" value="5000"/>
+</div>
+</div>
+<div class="space-y-2">
+<div class="flex justify-between text-gray-400 text-sm uppercase font-bold tracking-wider">
+<span>Min</span>
+<span>50%</span>
+<span>Max</span>
+</div>
+<input class="w-full" max="100" min="0" step="10" type="range" value="10"/>
+</div>
+<div class="flex justify-between gap-2 mt-2">
+<button class="flex-1 bg-gray-700 border-2 border-black text-gray-300 text-sm py-1 hover:bg-gray-600 shadow-retro-sm active:translate-y-[2px] active:translate-x-[2px] active:shadow-none transition-all">10%</button>
+<button class="flex-1 bg-gray-700 border-2 border-black text-gray-300 text-sm py-1 hover:bg-gray-600 shadow-retro-sm active:translate-y-[2px] active:translate-x-[2px] active:shadow-none transition-all">25%</button>
+<button class="flex-1 bg-gray-700 border-2 border-black text-gray-300 text-sm py-1 hover:bg-gray-600 shadow-retro-sm active:translate-y-[2px] active:translate-x-[2px] active:shadow-none transition-all">50%</button>
+<button class="flex-1 bg-gray-700 border-2 border-black text-gray-300 text-sm py-1 hover:bg-gray-600 shadow-retro-sm active:translate-y-[2px] active:translate-x-[2px] active:shadow-none transition-all">MAX</button>
+</div>
+</div>
+<div class="p-4 bg-retro-black border-t-4 border-black flex gap-4">
+<button class="flex-1 bg-gray-300 border-4 border-black py-3 px-4 text-black text-xl font-bold shadow-retro hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-retro-sm active:translate-y-[4px] active:translate-x-[4px] active:shadow-none transition-all uppercase tracking-wider">
+                Cancel
+            </button>
+<button class="flex-1 bg-modal-lime border-4 border-black py-3 px-4 text-black text-xl font-bold shadow-retro hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-retro-sm active:translate-y-[4px] active:translate-x-[4px] active:shadow-none transition-all uppercase tracking-wider">
+                Confirm
+            </button>
+</div>
+</div>
+</div>
+<div class="bg-primary p-4 border-b-4 border-black relative z-20">
+<div class="absolute top-2 left-4 opacity-50 pointer-events-none">
+<svg fill="white" height="30" viewBox="0 0 60 30" width="60">
+<rect height="10" width="40" x="10" y="10"></rect>
+<rect height="10" width="20" x="20" y="0"></rect>
+<rect height="10" width="20" x="20" y="20"></rect>
+<rect height="10" width="10" x="0" y="10"></rect>
+<rect height="10" width="10" x="50" y="10"></rect>
+</svg>
+</div>
+<div class="flex items-center justify-between mt-6">
+<button class="bg-white border-2 border-black p-2 shadow-retro active:shadow-retro-sm active:translate-x-[2px] active:translate-y-[2px] transition-transform mr-2">
+<span class="material-icons-round text-black text-2xl">chat_bubble</span>
+</button>
+<div class="flex space-x-3 overflow-x-auto pb-1 flex-1 justify-end no-scrollbar">
+<div class="flex flex-col items-center">
+<div class="w-12 h-12 bg-yellow-300 border-2 border-black mb-1 flex items-center justify-center relative shadow-retro-sm">
+<span class="material-icons-round text-black">face</span>
+<div class="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 border border-black"></div>
+</div>
+<div class="bg-black text-white px-1 text-xs border border-white font-bold tracking-widest">$4.2K</div>
+</div>
+<div class="flex flex-col items-center">
+<div class="w-12 h-12 bg-pink-400 border-2 border-black mb-1 flex items-center justify-center relative shadow-retro-sm">
+<span class="material-icons-round text-black">face_3</span>
+<div class="absolute -bottom-1 -right-1 w-3 h-3 bg-gray-400 border border-black"></div>
+</div>
+<div class="bg-black text-white px-1 text-xs border border-white font-bold tracking-widest">$1.8K</div>
+</div>
+<div class="flex flex-col items-center">
+<div class="w-12 h-12 bg-orange-400 border-2 border-black mb-1 flex items-center justify-center relative shadow-retro-sm">
+<span class="material-icons-round text-black">smart_toy</span>
+<div class="absolute -bottom-1 -right-1 w-3 h-3 bg-red-500 border border-black"></div>
+</div>
+<div class="bg-black text-white px-1 text-xs border border-white font-bold tracking-widest">$900</div>
+</div>
+</div>
+</div>
+</div>
+<div class="bg-retro-black p-4 border-b-4 border-black relative z-10">
+<div class="border-2 border-retro-yellow p-3 bg-opacity-20 bg-gray-800">
+<div class="flex justify-between items-baseline mb-2">
+<h2 class="text-retro-yellow text-2xl font-bold uppercase tracking-widest shadow-black drop-shadow-md">Round 1: START</h2>
+<span class="text-white text-xs bg-red-600 px-2 py-0.5 border border-white animate-pulse">LIVE</span>
+</div>
+<div class="text-gray-400 text-lg mb-1 font-bold">DATE: JULY 2023</div>
+<p class="text-gray-300 leading-tight text-lg font-medium border-l-4 border-retro-yellow pl-2 mt-2">
+                    Market sentiment is shifting. A new wave of meme coins is flooding the chain. Choose wisely.
+                </p>
+</div>
+</div>
+<div class="bg-secondary p-4 border-b-4 border-black flex flex-col justify-center relative overflow-hidden z-10">
+<div class="absolute inset-0 opacity-10" style="background-image: radial-gradient(black 1px, transparent 1px); background-size: 4px 4px;"></div>
+<div class="flex justify-between items-center z-10 w-full mb-3">
+<div class="flex flex-col">
+<span class="text-white text-lg font-bold border-b-2 border-black w-max mb-1">TOTAL ASSETS</span>
+<span class="text-4xl text-white font-black drop-shadow-[2px_2px_0_rgba(0,0,0,1)]">$50,000</span>
+</div>
+<div class="flex flex-col space-y-2">
+<button class="bg-retro-yellow px-3 py-1 border-2 border-black text-black font-bold shadow-retro hover:translate-y-1 hover:translate-x-1 hover:shadow-none transition-all flex items-center text-sm">
+<span class="material-icons-round text-sm mr-1">newspaper</span> NEWS
+                    </button>
+<button class="bg-retro-yellow px-3 py-1 border-2 border-black text-black font-bold shadow-retro hover:translate-y-1 hover:translate-x-1 hover:shadow-none transition-all flex items-center text-sm">
+<span class="material-icons-round text-sm mr-1">attach_money</span> CASH
+                    </button>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4 z-10 w-full">
+<div class="bg-black bg-opacity-20 border-2 border-black p-2 flex flex-col">
+<span class="text-white text-sm font-bold opacity-80">ON-CHAIN</span>
+<span class="text-white text-xl font-bold">$20,000</span>
+</div>
+<div class="bg-black bg-opacity-20 border-2 border-black p-2 flex flex-col">
+<span class="text-white text-sm font-bold opacity-80">OFF-CHAIN</span>
+<span class="text-white text-xl font-bold">$30,000</span>
+</div>
+</div>
+</div>
+<div class="bg-solid-lime flex-1 p-4 relative flex flex-col items-center justify-center overflow-hidden">
+<div class="relative z-10 flex flex-col items-center justify-center pb-8">
+<div class="relative mb-8 group hover:scale-105 transition-transform duration-300">
+<svg class="drop-shadow-[8px_8px_0px_rgba(0,0,0,1)]" height="160" viewBox="0 0 120 160" width="120" xmlns="http://www.w3.org/2000/svg">
+<g transform="translate(10, 10)">
+<rect fill="#000" height="20" width="50" x="35" y="15"></rect>
+<rect fill="#000" height="20" width="20" x="85" y="35"></rect>
+<rect fill="#000" height="20" width="20" x="85" y="55"></rect>
+<rect fill="#000" height="20" width="20" x="65" y="75"></rect>
+<rect fill="#000" height="20" width="20" x="45" y="95"></rect>
+<rect fill="#000" height="20" width="20" x="45" y="115"></rect>
+<rect fill="#000" height="20" width="20" x="45" y="145"></rect>
+<rect fill="#000" height="20" width="20" x="15" y="35"></rect>
+<rect fill="#65a30d" height="20" stroke="black" stroke-width="4" width="50" x="30" y="10"></rect>
+<rect fill="#65a30d" height="20" stroke="black" stroke-width="4" width="20" x="80" y="30"></rect>
+<rect fill="#65a30d" height="20" stroke="black" stroke-width="4" width="20" x="80" y="50"></rect>
+<rect fill="#65a30d" height="20" stroke="black" stroke-width="4" width="20" x="60" y="70"></rect>
+<rect fill="#65a30d" height="20" stroke="black" stroke-width="4" width="20" x="40" y="90"></rect>
+<rect fill="#65a30d" height="20" stroke="black" stroke-width="4" width="20" x="40" y="110"></rect>
+<rect fill="#65a30d" height="20" stroke="black" stroke-width="4" width="20" x="10" y="30"></rect>
+<rect fill="#65a30d" height="20" stroke="black" stroke-width="4" width="20" x="40" y="140"></rect>
+<rect fill="#a3e635" height="4" width="42" x="34" y="14"></rect>
+<rect fill="#a3e635" height="4" width="12" x="84" y="34"></rect>
+<rect fill="#a3e635" height="4" width="12" x="64" y="74"></rect>
+<rect fill="#a3e635" height="4" width="12" x="44" y="94"></rect>
+<rect fill="#a3e635" height="4" width="12" x="44" y="144"></rect>
+</g>
+</svg>
+</div>
+<div class="bg-black text-white px-6 py-3 border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.4)] transform -rotate-2">
+<h3 class="text-2xl font-bold tracking-[0.2em] uppercase text-center leading-none text-retro-yellow">
+                        AWAITING<br/>INTEL
+                    </h3>
+</div>
+</div>
+<div class="absolute bottom-4 left-4 opacity-30">
+<span class="material-icons-round text-black text-3xl">grid_4x4</span>
+</div>
+<div class="absolute bottom-4 right-4 opacity-30">
+<span class="material-icons-round text-black text-3xl">grid_4x4</span>
+</div>
+</div>
+</div>
+</body></html>
