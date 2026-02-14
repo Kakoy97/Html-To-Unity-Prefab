@@ -71,9 +71,9 @@ namespace HtmlToPrefab.Editor
                     changed = true;
                 }
 
-                if (importer.maxTextureSize < 4096)
+                if (importer.maxTextureSize < 8192)
                 {
-                    importer.maxTextureSize = 4096;
+                    importer.maxTextureSize = 8192;
                     changed = true;
                 }
 

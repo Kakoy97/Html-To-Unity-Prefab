@@ -44,6 +44,18 @@ namespace HtmlToPrefab.Editor
     }
 
     [Serializable]
+    internal sealed class LayoutCaptureInfo
+    {
+        public string mode;
+        public float imageWidth;
+        public float imageHeight;
+        public float contentOffsetX;
+        public float contentOffsetY;
+        public float contentWidth;
+        public float contentHeight;
+    }
+
+    [Serializable]
     internal sealed class LayoutNode
     {
         public string id;
@@ -55,12 +67,14 @@ namespace HtmlToPrefab.Editor
         public List<LayoutAttribute> attrs;
         public string domPath;
         public LayoutRect rect;
+        public LayoutRect contentBounds;
         public float rotation;
         public bool transformNeutralized;
         public int neutralizedAncestorCount;
         public List<LayoutNode> children;
 
         public string imagePath;
+        public LayoutCaptureInfo capture;
         public bool rotationBaked;
         public float rotationOriginal;
 
@@ -96,6 +110,7 @@ namespace HtmlToPrefab.Editor
             if (node.children == null) node.children = new List<LayoutNode>();
             if (node.classes == null) node.classes = new List<string>();
             if (node.attrs == null) node.attrs = new List<LayoutAttribute>();
+            if (node.capture == null) node.capture = new LayoutCaptureInfo();
             for (var i = 0; i < node.children.Count; i++)
             {
                 Normalize(node.children[i]);

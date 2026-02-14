@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -6,28 +7,10 @@ namespace HtmlToPrefab.Editor
 {
     public sealed class HtmlBakeWindow : EditorWindow
     {
-        private enum NodeRuntimeMode
-        {
-            Auto,
-            CustomPath
-        }
-
-        private enum RootSelectionMode
-        {
-            Auto,
-            CustomSelector
-        }
-
         private string _htmlPath = string.Empty;
-        private string _nodeExecutable = string.Empty;
-        private string _rootSelector = string.Empty;
-        private NodeRuntimeMode _nodeRuntimeMode = NodeRuntimeMode.Auto;
-        private RootSelectionMode _rootSelectionMode = RootSelectionMode.Auto;
-        private bool _debug;
+        private string _uiFolder = "Assets/Resources/UI";
         private int _viewportWidth = 750;
         private int _viewportHeight = 1624;
-        private float _deviceScaleFactor = 1f;
-        private bool _showAdvanced;
         private Vector2 _logScroll;
         private string _logText = string.Empty;
 
@@ -42,7 +25,9 @@ namespace HtmlToPrefab.Editor
         {
             DrawHtmlFileSection();
             EditorGUILayout.Space(8f);
-            DrawOptionsSection();
+            DrawTargetSection();
+            EditorGUILayout.Space(8f);
+            DrawOutputFolderSection();
             EditorGUILayout.Space(8f);
             DrawActionsSection();
             EditorGUILayout.Space(8f);
@@ -75,73 +60,51 @@ namespace HtmlToPrefab.Editor
             HandleDragAndDrop(dropRect);
         }
 
-        private void DrawOptionsSection()
+        private void DrawTargetSection()
         {
-            EditorGUILayout.LabelField("Bake Options", EditorStyles.boldLabel);
-            _debug = EditorGUILayout.Toggle("Debug Output", _debug);
-
-            _showAdvanced = EditorGUILayout.Foldout(_showAdvanced, "Advanced Options", true);
-            if (!_showAdvanced)
-            {
-                return;
-            }
-
-            EditorGUILayout.Space(2f);
-            DrawRootSelectionOptions();
-            EditorGUILayout.Space(4f);
-            DrawNodeRuntimeOptions();
-            EditorGUILayout.Space(4f);
-
-            _viewportWidth = EditorGUILayout.IntField("Viewport Width", _viewportWidth);
-            _viewportHeight = EditorGUILayout.IntField("Viewport Height", _viewportHeight);
-            _deviceScaleFactor = EditorGUILayout.FloatField("Device Scale Factor", _deviceScaleFactor);
+            EditorGUILayout.LabelField("Target Size", EditorStyles.boldLabel);
+            _viewportWidth = EditorGUILayout.IntField("Target Width (Physical)", _viewportWidth);
+            _viewportHeight = EditorGUILayout.IntField("Target Height (Physical)", _viewportHeight);
         }
 
-        private void DrawRootSelectionOptions()
+        private void DrawOutputFolderSection()
         {
-            _rootSelectionMode = (RootSelectionMode)EditorGUILayout.EnumPopup("UI Root", _rootSelectionMode);
-            if (_rootSelectionMode == RootSelectionMode.Auto)
-            {
-                EditorGUILayout.HelpBox(
-                    "Auto mode detects the main UI container and crops to it automatically.",
-                    MessageType.Info
-                );
-                return;
-            }
-
-            _rootSelector = EditorGUILayout.TextField("Root Selector", _rootSelector);
-        }
-
-        private void DrawNodeRuntimeOptions()
-        {
-            _nodeRuntimeMode = (NodeRuntimeMode)EditorGUILayout.EnumPopup("Node Runtime", _nodeRuntimeMode);
-            if (_nodeRuntimeMode == NodeRuntimeMode.Auto)
-            {
-                EditorGUILayout.HelpBox(
-                    "Auto mode uses `node` from system PATH. Switch to Custom Path if auto detection fails.",
-                    MessageType.Info
-                );
-                return;
-            }
+            EditorGUILayout.LabelField("Output Folder", EditorStyles.boldLabel);
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                _nodeExecutable = EditorGUILayout.TextField("Node Path", _nodeExecutable);
+                _uiFolder = EditorGUILayout.TextField("Path", _uiFolder);
                 if (GUILayout.Button("Browse", GUILayout.Width(90f)))
                 {
-                    var selected = EditorUtility.OpenFilePanel("Select Node Executable", "", "exe");
+                    var selected = EditorUtility.OpenFolderPanel("Select Output Folder", Application.dataPath, string.Empty);
                     if (!string.IsNullOrEmpty(selected))
                     {
-                        _nodeExecutable = selected;
-                        Repaint();
+                        if (TryAbsoluteToAssetPath(selected, out var assetPath))
+                        {
+                            _uiFolder = assetPath;
+                            Repaint();
+                        }
+                        else
+                        {
+                            EditorUtility.DisplayDialog(
+                                "Invalid Folder",
+                                "Output folder must be inside this Unity project (under Assets).",
+                                "OK"
+                            );
+                        }
                     }
                 }
             }
+
+            EditorGUILayout.HelpBox(
+                "Use a folder under Assets/Resources (e.g. Assets/Resources/HtmlBake).",
+                MessageType.Info
+            );
         }
 
         private void DrawActionsSection()
         {
-            if (!GUILayout.Button("Bake To Assets/Resources/UI", GUILayout.Height(32f)))
+            if (!GUILayout.Button("Bake", GUILayout.Height(32f)))
             {
                 return;
             }
@@ -165,47 +128,29 @@ namespace HtmlToPrefab.Editor
                 return;
             }
 
-            var nodeExecutable = "node";
-            if (_nodeRuntimeMode == NodeRuntimeMode.CustomPath)
+            var outputFolder = NormalizeAssetFolder(_uiFolder);
+            if (!IsValidOutputFolder(outputFolder))
             {
-                if (string.IsNullOrWhiteSpace(_nodeExecutable) || !File.Exists(_nodeExecutable))
-                {
-                    EditorUtility.DisplayDialog("Bake Failed", "Please select a valid node executable path.", "OK");
-                    return;
-                }
-
-                nodeExecutable = _nodeExecutable;
+                EditorUtility.DisplayDialog(
+                    "Bake Failed",
+                    "Output Folder must be inside Assets/Resources and cannot be Assets or Assets/Resources root.",
+                    "OK"
+                );
+                return;
             }
 
-            var rootSelector = "auto";
-            if (_rootSelectionMode == RootSelectionMode.CustomSelector)
-            {
-                rootSelector = (_rootSelector ?? string.Empty).Trim();
-                if (string.IsNullOrEmpty(rootSelector))
-                {
-                    EditorUtility.DisplayDialog("Bake Failed", "Root Selector cannot be empty in Custom mode.", "OK");
-                    return;
-                }
-            }
-
-            var request = new BakeRequest
-            {
-                HtmlAbsolutePath = _htmlPath,
-                NodeExecutable = nodeExecutable,
-                RootSelector = rootSelector,
-                Debug = _debug,
-                BakeRotation = false,
-                StableIds = true,
-                ViewportWidth = Mathf.Max(1, _viewportWidth),
-                ViewportHeight = Mathf.Max(1, _viewportHeight),
-                DeviceScaleFactor = Mathf.Max(0.01f, _deviceScaleFactor)
-            };
+            EnsureOutputFolderExists(outputFolder);
 
             BakeResult result;
             try
             {
                 EditorUtility.DisplayProgressBar("HTML UI Baker", "Running bake pipeline...", 0.5f);
-                result = BakePipeline.Run(request);
+                result = BakePipeline.RunBake(
+                    _htmlPath,
+                    outputFolder,
+                    Mathf.Max(1, _viewportWidth),
+                    Mathf.Max(1, _viewportHeight)
+                );
             }
             finally
             {
@@ -223,6 +168,18 @@ namespace HtmlToPrefab.Editor
             {
                 EditorUtility.DisplayDialog("Bake Failed", result.Message, "OK");
             }
+        }
+
+        private static void EnsureOutputFolderExists(string assetFolderPath)
+        {
+            if (AssetDatabase.IsValidFolder(assetFolderPath))
+            {
+                return;
+            }
+
+            var absolutePath = AssetPathUtil.ToAbsolutePath(assetFolderPath);
+            Directory.CreateDirectory(absolutePath);
+            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
         }
 
         private void HandleDragAndDrop(Rect dropRect)
@@ -253,6 +210,44 @@ namespace HtmlToPrefab.Editor
 
                 evt.Use();
             }
+        }
+
+        private static bool TryAbsoluteToAssetPath(string absolutePath, out string assetPath)
+        {
+            assetPath = string.Empty;
+            if (string.IsNullOrWhiteSpace(absolutePath)) return false;
+
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            if (string.IsNullOrEmpty(projectRoot)) return false;
+
+            var normalizedProjectRoot = projectRoot.Replace('\\', '/').TrimEnd('/');
+            var normalizedAbsolute = absolutePath.Replace('\\', '/').TrimEnd('/');
+            if (!normalizedAbsolute.StartsWith(normalizedProjectRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            assetPath = normalizedAbsolute.Substring(normalizedProjectRoot.Length + 1);
+            return assetPath.StartsWith("Assets", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeAssetFolder(string assetPath)
+        {
+            var normalized = (assetPath ?? string.Empty).Trim().Replace('\\', '/');
+            while (normalized.EndsWith("/", StringComparison.Ordinal))
+            {
+                normalized = normalized.Substring(0, normalized.Length - 1);
+            }
+            return normalized;
+        }
+
+        private static bool IsValidOutputFolder(string assetPath)
+        {
+            if (string.IsNullOrWhiteSpace(assetPath)) return false;
+            if (!assetPath.StartsWith("Assets/Resources", StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.Equals(assetPath, "Assets", StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.Equals(assetPath, "Assets/Resources", StringComparison.OrdinalIgnoreCase)) return false;
+            return true;
         }
 
         private static bool IsHtmlFile(string filePath)

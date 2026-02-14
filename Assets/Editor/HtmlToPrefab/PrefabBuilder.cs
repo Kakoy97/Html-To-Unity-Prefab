@@ -27,30 +27,43 @@ namespace HtmlToPrefab.Editor
             var rootGo = new GameObject(htmlName, typeof(RectTransform));
             try
             {
-                var sourceRootRect = root.rect ?? new LayoutRect();
+                // Prefer the layout root physical size; targetWidth/targetHeight are fallback only.
+
+                var finalWidth = (root.rect != null && root.rect.width > 0f)
+                    ? root.rect.width
+                    : Mathf.Max(1f, targetWidth);
+                var finalHeight = (root.rect != null && root.rect.height > 0f)
+                    ? root.rect.height
+                    : Mathf.Max(1f, targetHeight);
+
                 var outputRootRect = new LayoutRect
                 {
                     x = 0f,
                     y = 0f,
-                    width = Mathf.Max(1f, targetWidth > 0 ? targetWidth : sourceRootRect.width),
-                    height = Mathf.Max(1f, targetHeight > 0 ? targetHeight : sourceRootRect.height),
+                    width = finalWidth,
+                    height = finalHeight,
                 };
                 var rootRt = rootGo.GetComponent<RectTransform>();
                 ConfigureRect(rootRt, null, outputRootRect, outputRootRect);
 
+                // Create content container that uses root physical coordinates directly.
                 var contentGo = new GameObject("__content", typeof(RectTransform));
                 var contentRt = contentGo.GetComponent<RectTransform>();
                 contentRt.SetParent(rootRt, false);
-                ConfigureRect(contentRt, outputRootRect, sourceRootRect, outputRootRect);
 
-                var scaleX = sourceRootRect.width > 0 ? (outputRootRect.width / sourceRootRect.width) : 1f;
-                var scaleY = sourceRootRect.height > 0 ? (outputRootRect.height / sourceRootRect.height) : 1f;
-                contentRt.localScale = new Vector3(scaleX, scaleY, 1f);
+                // 涓嶅啀闇€瑕佺缉鏀捐绠楋紝鐩存帴浣跨敤鐗╃悊鍧愭爣
+                var sourceRootRect = root.rect ?? outputRootRect;
+                contentRt.anchorMin = new Vector2(0f, 1f);
+                contentRt.anchorMax = new Vector2(0f, 1f);
+                contentRt.pivot = new Vector2(0f, 1f);
+                contentRt.sizeDelta = new Vector2(sourceRootRect.width, sourceRootRect.height);
+                contentRt.anchoredPosition = Vector2.zero;
+                contentRt.localScale = Vector3.one;
 
                 var bgSprite = LoadSprite(uiFolderAssetPath, "images/bg.png");
                 if (bgSprite != null)
                 {
-                    CreateBackground(contentRt, sourceRootRect, bgSprite);
+                    CreateBackground(rootRt, outputRootRect, bgSprite);
                 }
 
                 BuildChildren(root, contentRt, sourceRootRect, uiFolderAssetPath);
@@ -65,6 +78,7 @@ namespace HtmlToPrefab.Editor
                 UnityEngine.Object.DestroyImmediate(rootGo);
             }
         }
+
 
         private static void BuildChildren(LayoutNode node, RectTransform parent, LayoutRect parentRectAbs, string uiFolderAssetPath)
         {
@@ -87,9 +101,10 @@ namespace HtmlToPrefab.Editor
 
             var rect = node.rect ?? new LayoutRect();
             ConfigureRect(rt, parentRectAbs, rect, parentRectAbs);
+            var visualRt = EnsureVisualRoot(rt, rect);
             if (Mathf.Abs(node.rotation) > 0.001f)
             {
-                rt.localRotation = Quaternion.Euler(0f, 0f, -node.rotation);
+                visualRt.localRotation = Quaternion.Euler(0f, 0f, -node.rotation);
             }
 
             if (!string.IsNullOrEmpty(node.imagePath))
@@ -97,17 +112,17 @@ namespace HtmlToPrefab.Editor
                 var sprite = LoadSprite(uiFolderAssetPath, node.imagePath);
                 if (sprite != null)
                 {
-                    var img = go.AddComponent<Image>();
+                    ApplyCaptureFrame(visualRt, rect, node.capture);
+                    var img = visualRt.gameObject.AddComponent<Image>();
                     img.sprite = sprite;
                     img.raycastTarget = false;
                     img.preserveAspect = false;
-                    img.SetNativeSize();
                 }
             }
 
             if (string.Equals(node.type, "Text", StringComparison.OrdinalIgnoreCase))
             {
-                var text = go.AddComponent<TextMeshProUGUI>();
+                var text = visualRt.gameObject.AddComponent<TextMeshProUGUI>();
                 ApplyTextStyle(text, node);
             }
 
@@ -120,7 +135,15 @@ namespace HtmlToPrefab.Editor
             var go = new GameObject("__bg", typeof(RectTransform), typeof(Image));
             var rt = go.GetComponent<RectTransform>();
             rt.SetParent(parent, false);
-            ConfigureRect(rt, rootRect, rootRect, rootRect);
+            
+            // 鑳屾櫙鍥捐缃负 Stretch/Stretch (Anchor Min 0,0 / Max 1,1)锛孫ffset Min/Max 鍧囦负 0
+            // 杩欐牱鑳屾櫙鍥炬案杩滃畬缇庨€傞厤 Canvas 澶у皬
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+            rt.localScale = Vector3.one;
 
             var image = go.GetComponent<Image>();
             image.sprite = sprite;
@@ -143,6 +166,59 @@ namespace HtmlToPrefab.Editor
             rt.sizeDelta = new Vector2(Mathf.Max(0f, nodeRect.width), Mathf.Max(0f, nodeRect.height));
             rt.anchoredPosition = new Vector2(localX, -localY);
             rt.localScale = Vector3.one;
+        }
+
+        private static RectTransform EnsureVisualRoot(RectTransform parent, LayoutRect nodeRect)
+        {
+            var existing = parent.Find("__visual");
+            RectTransform visualRt = null;
+            if (existing != null)
+            {
+                visualRt = existing.GetComponent<RectTransform>();
+            }
+
+            if (visualRt == null)
+            {
+                var visualGo = new GameObject("__visual", typeof(RectTransform));
+                visualRt = visualGo.GetComponent<RectTransform>();
+                visualRt.SetParent(parent, false);
+            }
+
+            visualRt.anchorMin = new Vector2(0f, 1f);
+            visualRt.anchorMax = new Vector2(0f, 1f);
+            visualRt.pivot = new Vector2(0f, 1f);
+            visualRt.sizeDelta = new Vector2(Mathf.Max(0f, nodeRect.width), Mathf.Max(0f, nodeRect.height));
+            visualRt.anchoredPosition = Vector2.zero;
+            visualRt.localScale = Vector3.one;
+            visualRt.localRotation = Quaternion.identity;
+
+            return visualRt;
+        }
+
+        private static void ApplyCaptureFrame(RectTransform visualRt, LayoutRect nodeRect, LayoutCaptureInfo capture)
+        {
+            if (visualRt == null)
+            {
+                return;
+            }
+
+            var fallbackWidth = Mathf.Max(0f, nodeRect != null ? nodeRect.width : 0f);
+            var fallbackHeight = Mathf.Max(0f, nodeRect != null ? nodeRect.height : 0f);
+
+            if (capture == null || capture.imageWidth <= 0f || capture.imageHeight <= 0f)
+            {
+                visualRt.sizeDelta = new Vector2(fallbackWidth, fallbackHeight);
+                visualRt.anchoredPosition = Vector2.zero;
+                return;
+            }
+
+            var imageWidth = Mathf.Max(0f, capture.imageWidth);
+            var imageHeight = Mathf.Max(0f, capture.imageHeight);
+            var offsetX = capture.contentOffsetX;
+            var offsetY = capture.contentOffsetY;
+
+            visualRt.sizeDelta = new Vector2(imageWidth, imageHeight);
+            visualRt.anchoredPosition = new Vector2(-offsetX, offsetY);
         }
 
         private static Sprite LoadSprite(string uiFolderAssetPath, string relativeImagePath)
@@ -687,3 +763,4 @@ namespace HtmlToPrefab.Editor
         }
     }
 }
+

@@ -74,6 +74,48 @@ function normalizeNodeCoordinates(node, offsetX, offsetY) {
   }
 }
 
+function computeContentBounds(node) {
+  if (!node) return null;
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  const traverse = (n) => {
+    if (!n || !n.rect) return;
+    const rect = n.rect;
+    if (rect.width > 0 && rect.height > 0) {
+      minX = Math.min(minX, rect.x);
+      minY = Math.min(minY, rect.y);
+      maxX = Math.max(maxX, rect.x + rect.width);
+      maxY = Math.max(maxY, rect.y + rect.height);
+    }
+    const children = n.children || [];
+    for (const child of children) {
+      traverse(child);
+    }
+  };
+
+  // Only traverse children, not root itself (root.rect is the viewport/container)
+  const children = node.children || [];
+  for (const child of children) {
+    traverse(child);
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+    // No valid children found, use root rect as fallback
+    return node.rect ? { ...node.rect } : null;
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
+}
+
 function toScreenshotClip(rect) {
   if (!rect) return null;
   const x0 = Number.isFinite(rect.x) ? rect.x : 0;
@@ -89,8 +131,26 @@ function toScreenshotClip(rect) {
   return { x, y, width, height };
 }
 
+async function safeEvaluateOnHandle(handle, label, pageFunction, ...args) {
+  try {
+    return await handle.evaluate(pageFunction, ...args);
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    throw new Error(`[${label}] ${message}`);
+  }
+}
+
+async function safeEvaluateHandleOnHandle(handle, label, pageFunction, ...args) {
+  try {
+    return await handle.evaluateHandle(pageFunction, ...args);
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    throw new Error(`[${label}] ${message}`);
+  }
+}
+
 async function getElementPageRect(page, elementHandle) {
-  return page.evaluate((el) => {
+  return safeEvaluateOnHandle(elementHandle, 'getElementPageRect', (el) => {
     const rect = el.getBoundingClientRect();
     return {
       x: rect.left + window.scrollX,
@@ -98,7 +158,7 @@ async function getElementPageRect(page, elementHandle) {
       width: rect.width,
       height: rect.height,
     };
-  }, elementHandle);
+  });
 }
 
 async function detectAutoRootHandle(page) {
@@ -419,7 +479,10 @@ async function captureElementImage(page, elementHandle, outputPath, options = {}
 
   if (inPlace) {
     const markerId = uuidv4();
-    await page.evaluate((el, id, hideChildrenFlag, bakeRotationFlag, neutralizeTransformsFlag, iconTransparentModeFlag) => {
+    await safeEvaluateOnHandle(
+      elementHandle,
+      'captureElementImage.inPlace.setup',
+      (el, id, hideChildrenFlag, bakeRotationFlag, neutralizeTransformsFlag, iconTransparentModeFlag) => {
       const prev = el.getAttribute('data-bake-id');
       el.__bakePrevId = prev;
       el.setAttribute('data-bake-id', id);
@@ -555,9 +618,15 @@ async function captureElementImage(page, elementHandle, outputPath, options = {}
           node.style.pointerEvents = 'none';
         }
       }
-    }, elementHandle, markerId, hideChildren, bakeRotation, neutralizeTransforms, iconTransparentMode);
+      },
+      markerId,
+      hideChildren,
+      bakeRotation,
+      neutralizeTransforms,
+      iconTransparentMode
+    );
 
-    const clip = await page.evaluate((el) => {
+    const clip = await safeEvaluateOnHandle(elementHandle, 'captureElementImage.inPlace.clip', (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
 
@@ -616,35 +685,18 @@ async function captureElementImage(page, elementHandle, outputPath, options = {}
         width: rect.width + shadowPad * 2,
         height: rect.height + shadowPad * 2,
       };
-    }, elementHandle);
+    });
 
     if (clip && clip.width > 0 && clip.height > 0) {
-      const currentViewport = page.viewport();
-      let resized = false;
-      const nextWidth = Math.ceil(clip.width);
-      const nextHeight = Math.ceil(clip.height);
-      if (currentViewport && (nextWidth > currentViewport.width || nextHeight > currentViewport.height)) {
-        await page.setViewport({
-          width: Math.max(nextWidth, currentViewport.width),
-          height: Math.max(nextHeight, currentViewport.height),
-          deviceScaleFactor: currentViewport.deviceScaleFactor || 2,
-        });
-        resized = true;
-      }
-
       await page.screenshot({
         path: outputPath,
         clip,
         captureBeyondViewport: true,
         omitBackground: true,
       });
-
-      if (resized && currentViewport) {
-        await page.setViewport(currentViewport);
-      }
     }
 
-    await page.evaluate((el, id) => {
+    await safeEvaluateOnHandle(elementHandle, 'captureElementImage.inPlace.cleanup', (el, id) => {
       const noMotionStyle = document.createElement('style');
       noMotionStyle.setAttribute('data-bake-no-motion', id);
       noMotionStyle.textContent = `
@@ -703,13 +755,16 @@ async function captureElementImage(page, elementHandle, outputPath, options = {}
       if (noMotionStyle.parentNode) {
         noMotionStyle.parentNode.removeChild(noMotionStyle);
       }
-    }, elementHandle, markerId);
+    }, markerId);
 
     return;
   }
 
   const cloneIsolateId = uuidv4();
-  const cloneHandle = await page.evaluateHandle((el, hideChildrenFlag, bakeRotationFlag, neutralizeTransformsFlag, isolateId, forceVisibleFlag) => {
+  const cloneHandle = await safeEvaluateHandleOnHandle(
+    elementHandle,
+    'captureElementImage.clone.create',
+    (el, hideChildrenFlag, bakeRotationFlag, neutralizeTransformsFlag, isolateId, forceVisibleFlag) => {
     document.documentElement.style.background = 'transparent';
     document.body.style.background = 'transparent';
 
@@ -859,10 +914,21 @@ async function captureElementImage(page, elementHandle, outputPath, options = {}
     clone.style.borderBottom = style.borderBottom;
     clone.style.borderLeft = style.borderLeft;
     clone.style.borderRadius = style.borderRadius;
-    clone.style.background = style.background;
+    
+    // [修复] 显式拷贝所有背景子属性，防止简写属性(.background)在混合样式下失效
+    clone.style.backgroundColor = style.backgroundColor;
+    clone.style.backgroundImage = style.backgroundImage;
+    clone.style.backgroundSize = style.backgroundSize;
+    clone.style.backgroundPosition = style.backgroundPosition;
+    clone.style.backgroundRepeat = style.backgroundRepeat;
+    clone.style.backgroundOrigin = style.backgroundOrigin;
+    clone.style.backgroundClip = style.backgroundClip;
+    clone.style.backgroundAttachment = style.backgroundAttachment;
+    // 为了兼容性仍保留简写，但上面的子属性会覆盖它
+    if (style.background) clone.style.background = style.background;
+    
     clone.style.boxShadow = style.boxShadow;
     clone.style.filter = style.filter;
-    clone.style.backgroundClip = style.backgroundClip;
     clone.style.overflow = style.overflow;
     clone.style.overflowX = style.overflowX;
     clone.style.overflowY = style.overflowY;
@@ -918,60 +984,48 @@ async function captureElementImage(page, elementHandle, outputPath, options = {}
     clone.__bakeCloneIsolateId = isolateId;
     document.body.appendChild(clone);
     return clone;
-  }, elementHandle, hideChildren, bakeRotation, neutralizeTransforms, cloneIsolateId, forceVisible);
+    },
+    hideChildren,
+    bakeRotation,
+    neutralizeTransforms,
+    cloneIsolateId,
+    forceVisible
+  );
 
-  const cloneElement = cloneHandle.asElement();
-  if (cloneElement) {
-    const clip = await page.evaluate((el) => {
-      const rect = el.getBoundingClientRect();
-      const pad = el.__bakePad || 0;
-      return {
-        x: Math.max(0, rect.left - pad),
-        y: Math.max(0, rect.top - pad),
-        width: rect.width + pad * 2,
-        height: rect.height + pad * 2,
-        pad,
-      };
-    }, cloneHandle);
+  const clip = await page.evaluate((isolateId) => {
+    const el = document.querySelector(`[data-bake-clone-id="${isolateId}"]`);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const pad = el.__bakePad || 0;
+    return {
+      x: Math.max(0, rect.left - pad),
+      y: Math.max(0, rect.top - pad),
+      width: rect.width + pad * 2,
+      height: rect.height + pad * 2,
+      pad,
+    };
+  }, cloneIsolateId);
 
-    if (clip && clip.width > 0 && clip.height > 0) {
-      const padding = 0;
-      const clipRect = {
-        x: Math.max(0, clip.x - padding),
-        y: Math.max(0, clip.y - padding),
-        width: Math.ceil(clip.width + padding * 2),
-        height: Math.ceil(clip.height + padding * 2),
-      };
+  if (clip && clip.width > 0 && clip.height > 0) {
+    const padding = 0;
+    const clipRect = {
+      x: Math.max(0, clip.x - padding),
+      y: Math.max(0, clip.y - padding),
+      width: Math.ceil(clip.width + padding * 2),
+      height: Math.ceil(clip.height + padding * 2),
+    };
 
-      const currentViewport = page.viewport();
-      let resized = false;
-      const nextWidth = Math.ceil(clipRect.width);
-      const nextHeight = Math.ceil(clipRect.height);
-      if (currentViewport && (nextWidth > currentViewport.width || nextHeight > currentViewport.height)) {
-        await page.setViewport({
-          width: Math.max(nextWidth, currentViewport.width),
-          height: Math.max(nextHeight, currentViewport.height),
-          deviceScaleFactor: currentViewport.deviceScaleFactor || 2,
-        });
-        resized = true;
-      }
-
-      await page.screenshot({
-        path: outputPath,
-        clip: clipRect,
-        captureBeyondViewport: true,
-        omitBackground: true,
-      });
-
-      if (resized && currentViewport) {
-        await page.setViewport(currentViewport);
-      }
-    }
+    await page.screenshot({
+      path: outputPath,
+      clip: clipRect,
+      captureBeyondViewport: true,
+      omitBackground: true,
+    });
   }
 
-  await page.evaluate((el) => {
+  await page.evaluate((isolateId) => {
     const noMotionStyle = document.createElement('style');
-    noMotionStyle.setAttribute('data-bake-no-motion-clone', '1');
+    noMotionStyle.setAttribute('data-bake-no-motion-clone', isolateId);
     noMotionStyle.textContent = `
       *, *::before, *::after {
         transition-property: none !important;
@@ -982,10 +1036,10 @@ async function captureElementImage(page, elementHandle, outputPath, options = {}
     `;
     (document.head || document.documentElement).appendChild(noMotionStyle);
 
-    if (el && el.__bakeCloneIsolateId) {
-      const style = document.querySelector(`style[data-bake-clone-isolate="${el.__bakeCloneIsolateId}"]`);
-      if (style) style.remove();
-    }
+    const style = document.querySelector(`style[data-bake-clone-isolate="${isolateId}"]`);
+    if (style) style.remove();
+
+    const el = document.querySelector(`[data-bake-clone-id="${isolateId}"]`);
     if (el && el.parentNode) {
       el.parentNode.removeChild(el);
     }
@@ -993,13 +1047,13 @@ async function captureElementImage(page, elementHandle, outputPath, options = {}
     if (noMotionStyle.parentNode) {
       noMotionStyle.parentNode.removeChild(noMotionStyle);
     }
-  }, cloneHandle);
+  }, cloneIsolateId);
 
   await cloneHandle.dispose();
 }
 
 async function captureOriginalElementImage(page, elementHandle, outputPath) {
-  const clip = await page.evaluate((el) => {
+  const clip = await safeEvaluateOnHandle(elementHandle, 'captureOriginalElementImage.clip', (el) => {
     const rect = el.getBoundingClientRect();
     const style = window.getComputedStyle(el);
 
@@ -1058,7 +1112,7 @@ async function captureOriginalElementImage(page, elementHandle, outputPath) {
       width: rect.width + shadowPad * 2,
       height: rect.height + shadowPad * 2,
     };
-  }, elementHandle);
+  });
 
   if (clip && clip.width > 0 && clip.height > 0) {
     await page.screenshot({
@@ -1070,8 +1124,34 @@ async function captureOriginalElementImage(page, elementHandle, outputPath) {
 }
 
 async function getElementInfo(page, elementHandle, options = {}) {
-  const { debug = false, neutralizeTransforms = false } = options;
-  return page.evaluate((el, includeDebug, neutralize) => {
+  // 从 options 中解构 dpr，不再访问 page.__bakeDpr
+  const { debug = false, neutralizeTransforms = false, dpr = 1 } = options;
+  
+  // 确保 elementHandle 是有效的
+  if (!elementHandle) {
+    throw new Error('elementHandle is null or undefined');
+  }
+  
+  // 验证 elementHandle 是否有效（检查是否有 dispose 方法，这是 ElementHandle 的特征）
+  if (typeof elementHandle.dispose !== 'function' && typeof elementHandle.asElement !== 'function') {
+    throw new Error('elementHandle is not a valid ElementHandle');
+  }
+  
+  // 确保所有参数都是可序列化的
+  const debugFlag = Boolean(debug);
+  const neutralizeFlag = Boolean(neutralizeTransforms);
+  const dprValue = Number(dpr);
+  
+  if (!Number.isFinite(dprValue) || dprValue <= 0) {
+    throw new Error(`Invalid DPR value: ${dprValue}`);
+  }
+  
+  // 使用 try-catch 来捕获协议错误
+  try {
+    return await safeEvaluateOnHandle(
+      elementHandle,
+      'getElementInfo.evaluate',
+      (el, includeDebug, neutralize, devicePixelRatio) => {
     const tagName = el.tagName ? el.tagName.toUpperCase() : '';
     const htmlTag = tagName ? tagName.toLowerCase() : '';
     const style = window.getComputedStyle(el);
@@ -1313,10 +1393,10 @@ async function getElementInfo(page, elementHandle, options = {}) {
 
       if (Number.isFinite(minX)) {
         directTextRect = {
-          x: minX + window.scrollX,
-          y: minY + window.scrollY,
-          width: maxX - minX,
-          height: maxY - minY,
+          x: (minX + window.scrollX) * devicePixelRatio,
+          y: (minY + window.scrollY) * devicePixelRatio,
+          width: (maxX - minX) * devicePixelRatio,
+          height: (maxY - minY) * devicePixelRatio,
         };
       }
     }
@@ -1327,6 +1407,16 @@ async function getElementInfo(page, elementHandle, options = {}) {
         entry.node.style.transformOrigin = entry.origin || '';
       }
     }
+
+    // 解析 CSS 像素值并转换为物理像素
+    const parseCssPxToPhysical = (cssValue) => {
+      if (!cssValue || cssValue === 'normal') return null;
+      const match = cssValue.match(/(-?\d*\.?\d+)px/);
+      if (match) {
+        return parseFloat(match[1]) * devicePixelRatio;
+      }
+      return null;
+    };
 
     const getDomPath = (node) => {
       if (!node || node.nodeType !== 1) return '';
@@ -1391,6 +1481,19 @@ async function getElementInfo(page, elementHandle, options = {}) {
       };
     }
 
+    // 将所有坐标和尺寸转换为物理像素
+    const physicalRect = {
+      x: (rectOverride.left + window.scrollX) * devicePixelRatio,
+      y: (rectOverride.top + window.scrollY) * devicePixelRatio,
+      width: rectOverride.width * devicePixelRatio,
+      height: rectOverride.height * devicePixelRatio,
+    };
+
+    // 转换字体相关尺寸
+    const physicalFontSize = parseCssPxToPhysical(style.fontSize);
+    const physicalLineHeight = parseCssPxToPhysical(style.lineHeight);
+    const physicalLetterSpacing = parseCssPxToPhysical(style.letterSpacing);
+
     return {
       tagName,
       htmlTag,
@@ -1399,12 +1502,7 @@ async function getElementInfo(page, elementHandle, options = {}) {
       classes,
       attrs,
       domPath,
-      rect: {
-        x: rectOverride.left + window.scrollX,
-        y: rectOverride.top + window.scrollY,
-        width: rectOverride.width,
-        height: rectOverride.height,
-      },
+      rect: physicalRect,
       text,
       textRaw: rawText,
       hasVisual,
@@ -1414,20 +1512,20 @@ async function getElementInfo(page, elementHandle, options = {}) {
       forceVisibleForCapture: transientHidden,
       hasText: text.length > 0,
       hasDirectText: directText.length > 0,
-      rotation,
+      rotation, // rotation 不需要转换
       hasTransform,
       transformChain: hasTransformChain,
       transformNeutralized: !!(changed && changed.length > 0),
       neutralizedAncestorCount: changed ? changed.length : 0,
       font: {
-        color: style.color,
-        fontSize: style.fontSize,
+        color: style.color, // 颜色不需要转换
+        fontSize: physicalFontSize !== null ? `${physicalFontSize}px` : style.fontSize,
         fontFamily: style.fontFamily,
         alignment: style.textAlign,
         fontWeight: style.fontWeight,
         fontStyle: style.fontStyle,
-        lineHeight: style.lineHeight,
-        letterSpacing: style.letterSpacing,
+        lineHeight: physicalLineHeight !== null ? `${physicalLineHeight}px` : style.lineHeight,
+        letterSpacing: physicalLetterSpacing !== null ? `${physicalLetterSpacing}px` : style.letterSpacing,
         textTransform: style.textTransform,
         textDecoration: style.textDecorationLine || style.textDecoration,
         textShadow: style.textShadow,
@@ -1444,11 +1542,22 @@ async function getElementInfo(page, elementHandle, options = {}) {
       directTextRect,
       debugInfo,
     };
-  }, elementHandle, debug, neutralizeTransforms);
+      },
+      debugFlag,
+      neutralizeFlag,
+      dprValue
+    );
+  } catch (error) {
+    // 如果是协议错误，提供更详细的错误信息
+    if (error.message && error.message.includes('JavaScript world')) {
+      throw new Error(`Protocol error in getElementInfo: elementHandle may be invalid or from different context. Original error: ${error.message}`);
+    }
+    throw error;
+  }
 }
 
 async function needsInPlaceCapture(page, elementHandle) {
-  return page.evaluate((el) => {
+  return safeEvaluateOnHandle(elementHandle, 'needsInPlaceCapture.evaluate', (el) => {
     const getReasons = (style) => {
       const reasons = [];
       if (!style) return reasons;
@@ -1481,7 +1590,7 @@ async function needsInPlaceCapture(page, elementHandle) {
       depth += 1;
     }
     return { inPlace: false, reason: null };
-  }, elementHandle);
+  });
 }
 
 async function processElement(page, elementHandle, imagesDir, debugState, options = {}) {
@@ -1494,44 +1603,58 @@ async function processElement(page, elementHandle, imagesDir, debugState, option
     childIndex = -1,
   } = options;
   // Skip elements under a full-screen mask (unless they are within the mask or above it).
-  if (page.__bakeMask && page.__bakeMask.hasMask) {
-    const shouldSkip = await page.evaluate((el, mask) => {
-      if (el === document.body || el === document.documentElement) return false;
+  if (page.__bakeMask && page.__bakeMask.hasMask && !page.__bakeMaskSkipDisabled) {
+    let shouldSkip = false;
+    try {
+      shouldSkip = await safeEvaluateOnHandle(elementHandle, 'processElement.maskSkip', (el) => {
+        if (el === document.body || el === document.documentElement) return false;
 
-      const maskEl = document.querySelector('[data-bake-mask="1"]');
-      if (!maskEl) return false;
-      if (el === maskEl) return false;
-      if (el.contains(maskEl)) return false;
-      const inMask = el.closest('[data-bake-mask="1"]');
-      if (inMask) return false;
+        const maskEl = document.querySelector('[data-bake-mask="1"]');
+        if (!maskEl) return false;
+        if (el === maskEl) return false;
+        if (el.contains(maskEl)) return false;
+        const inMask = el.closest('[data-bake-mask="1"]');
+        if (inMask) return false;
 
-      const rect = el.getBoundingClientRect();
-      const intersects = !(
-        rect.right <= mask.rect.left ||
-        rect.left >= mask.rect.right ||
-        rect.bottom <= mask.rect.top ||
-        rect.top >= mask.rect.bottom
-      );
-      if (!intersects) return false;
+        const maskRect = maskEl.getBoundingClientRect();
+        if (!maskRect || maskRect.width <= 0 || maskRect.height <= 0) return false;
 
-      const points = [
-        [rect.left + rect.width / 2, rect.top + rect.height / 2],
-        [rect.left + 1, rect.top + 1],
-        [rect.right - 1, rect.bottom - 1],
-      ];
+        const rect = el.getBoundingClientRect();
+        const intersects = !(
+          rect.right <= maskRect.left ||
+          rect.left >= maskRect.right ||
+          rect.bottom <= maskRect.top ||
+          rect.top >= maskRect.bottom
+        );
+        if (!intersects) return false;
 
-      const vw = window.innerWidth || document.documentElement.clientWidth;
-      const vh = window.innerHeight || document.documentElement.clientHeight;
-      for (const [x, y] of points) {
-        if (x < 0 || y < 0 || x > vw || y > vh) continue;
-        const top = document.elementFromPoint(x, y);
-        if (top && top.closest('[data-bake-mask="1"]')) {
-          return true;
+        const points = [
+          [rect.left + rect.width / 2, rect.top + rect.height / 2],
+          [rect.left + 1, rect.top + 1],
+          [rect.right - 1, rect.bottom - 1],
+        ];
+
+        const vw = window.innerWidth || document.documentElement.clientWidth;
+        const vh = window.innerHeight || document.documentElement.clientHeight;
+        for (const [x, y] of points) {
+          if (x < 0 || y < 0 || x > vw || y > vh) continue;
+          const top = document.elementFromPoint(x, y);
+          if (top && top.closest('[data-bake-mask="1"]')) {
+            return true;
+          }
         }
-      }
 
-      return false;
-    }, elementHandle, page.__bakeMask);
+        return false;
+      });
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      if (message.includes('Argument should belong to the same JavaScript world')) {
+        page.__bakeMaskSkipDisabled = true;
+        console.warn('[mask-skip] disabled due to JavaScript world mismatch; continue without mask occlusion skip.');
+      } else {
+        throw error;
+      }
+    }
 
     if (shouldSkip) return null;
   }
@@ -1539,6 +1662,7 @@ async function processElement(page, elementHandle, imagesDir, debugState, option
   const info = await getElementInfo(page, elementHandle, {
     debug: debugState && debugState.enabled,
     neutralizeTransforms: !bakeRotation,
+    dpr: page.__bakeDpr || 1, // 显式传递 DPR
   });
   if (!info.isVisible) return null;
 
@@ -1548,15 +1672,18 @@ async function processElement(page, elementHandle, imagesDir, debugState, option
   const isAtomicImageTag = ['IMG', 'SVG', 'CANVAS', 'VIDEO', 'PICTURE'].includes(info.tagName);
   const isVisual = info.hasVisual || isAtomicImageTag || info.isIconGlyph;
 
+  // 1) 类型判定：有子节点的视觉块优先归类为 Container，后续按 shouldCapture 决定是否截图。
   if (isRootBody || isMaskLayer) {
-    // Root background is already captured as bg.png; mask layers are composited from children.
+    type = 'Container';
+  } else if (isAtomicImageTag || info.isIconGlyph) {
+    // 原子图片元素与图标必须是 Image。
+    type = 'Image';
+  } else if (info.childCount > 0) {
     type = 'Container';
   } else if (isVisual) {
     type = 'Image';
-  } else if (info.hasDirectText && info.childCount === 0) {
+  } else if (info.hasDirectText) {
     type = 'Text';
-  } else if (info.childCount > 0) {
-    type = 'Container';
   } else {
     return null;
   }
@@ -1663,13 +1790,17 @@ async function processElement(page, elementHandle, imagesDir, debugState, option
     await child.dispose();
   }
 
-  if (type === 'Image') {
+  // 3) 视觉截图逻辑：
+  // Image 始终截图；Container 只要有视觉表现也截图（并且强制 hideChildren 只拍背景层）。
+  const shouldCapture = type === 'Image' || (type === 'Container' && isVisual);
+  if (shouldCapture) {
     const imageSerial = typeof nextImageSerial === 'function' ? nextImageSerial() : 0;
     const imageFileName = createImageFileName(imageSerial, htmlNamePart);
     const imagePath = `images/${imageFileName}.png`;
     node.imagePath = imagePath;
     const outputPath = path.join(imagesDir, `${imageFileName}.png`);
-    const hideChildren = info.hasVisual && !isAtomicImageTag;
+
+    const forceHideChildren = type === 'Container' && !isAtomicImageTag;
     let inPlace = false;
     let inPlaceReason = null;
     let captureMode = 'clone';
@@ -1678,15 +1809,20 @@ async function processElement(page, elementHandle, imagesDir, debugState, option
       inPlace = false;
       inPlaceReason = null;
       captureMode = 'clone';
-    } else if (!hideChildren) {
+    } else if (!forceHideChildren) {
       const inPlaceDecision = await needsInPlaceCapture(page, elementHandle);
       inPlace = !!(inPlaceDecision && inPlaceDecision.inPlace);
       inPlaceReason = inPlace ? (inPlaceDecision.reason || 'effect') : null;
       captureMode = inPlace ? 'inPlace' : 'clone';
+    } else {
+      // Container 背景截图固定走 clone 语义（通过 hideChildren 抠掉子内容）。
+      inPlace = false;
+      inPlaceReason = null;
+      captureMode = 'clone';
     }
     const neutralizeTransforms = info.transformNeutralized && !bakeRotation;
     await captureElementImage(page, elementHandle, outputPath, {
-      hideChildren,
+      hideChildren: forceHideChildren,
       inPlace,
       bakeRotation,
       neutralizeTransforms,
@@ -1723,6 +1859,7 @@ async function main() {
   let viewportWidth = DEFAULT_VIEWPORT.width;
   let viewportHeight = DEFAULT_VIEWPORT.height;
   let deviceScaleFactor = DEFAULT_VIEWPORT.deviceScaleFactor;
+  let logicalWidthOverride = null;
   let idMode = 'uuid';
   let rootSelector = null;
   for (const arg of args) {
@@ -1730,6 +1867,7 @@ async function main() {
     const widthArg = parseArgValue(arg, '--viewport-width');
     const heightArg = parseArgValue(arg, '--viewport-height');
     const dprArg = parseArgValue(arg, '--device-scale-factor');
+    const logicalWidthArg = parseArgValue(arg, '--logical-width');
     const idModeArg = parseArgValue(arg, '--id-mode');
     const rootSelectorArg = parseArgValue(arg, '--root-selector');
 
@@ -1745,6 +1883,8 @@ async function main() {
       viewportHeight = Math.round(toPositiveNumber(heightArg, DEFAULT_VIEWPORT.height));
     } else if (dprArg !== null) {
       deviceScaleFactor = toPositiveNumber(dprArg, DEFAULT_VIEWPORT.deviceScaleFactor);
+    } else if (logicalWidthArg !== null) {
+      logicalWidthOverride = Math.round(toPositiveNumber(logicalWidthArg, 375));
     } else if (idModeArg !== null) {
       idMode = idModeArg === 'stable' ? 'stable' : 'uuid';
     } else if (rootSelectorArg !== null) {
@@ -1779,10 +1919,37 @@ async function main() {
   const outputDir = path.resolve(outputDirInput || 'output');
   const imagesDir = path.join(outputDir, 'images');
   const htmlNamePart = sanitizeNamePart(path.basename(htmlPath, path.extname(htmlPath)), 'html', 64);
+  
+  // 智能分辨率适配：计算逻辑分辨率和 DPR
+  const BASE_LOGICAL_WIDTH = 375;
+  const targetWidth = viewportWidth; // 目标物理分辨率宽度
+  const targetHeight = viewportHeight; // 目标物理分辨率高度
+  
+  // 如果 viewportWidth > 500，判定为物理分辨率，使用基准逻辑宽度
+  // 否则直接使用 viewportWidth 作为逻辑宽度（向后兼容）
+  let logicalWidth;
+  if (logicalWidthOverride !== null) {
+    logicalWidth = logicalWidthOverride;
+  } else if (targetWidth > 500) {
+    logicalWidth = BASE_LOGICAL_WIDTH;
+  } else {
+    logicalWidth = targetWidth;
+  }
+  
+  const dpr = targetWidth / logicalWidth;
+  const logicalHeight = targetHeight / dpr;
+  
+  // 打印计算出的策略信息
+  console.log(`[分辨率适配] 目标物理分辨率: ${targetWidth}x${targetHeight}`);
+  console.log(`[分辨率适配] 逻辑 Viewport: ${Math.floor(logicalWidth)}x${Math.floor(logicalHeight)}`);
+  console.log(`[分辨率适配] DPR (设备像素比): ${dpr.toFixed(2)}`);
+  
   const viewport = {
-    width: viewportWidth,
-    height: viewportHeight,
-    deviceScaleFactor,
+    width: Math.floor(logicalWidth),
+    height: Math.floor(logicalHeight),
+    deviceScaleFactor: dpr,
+    isMobile: true,
+    hasTouch: true,
   };
 
   await fs.remove(outputDir);
@@ -1804,11 +1971,42 @@ async function main() {
   });
 
   const page = await browser.newPage();
+  
+  // 保存目标物理分辨率和 DPR，供后续使用
+  page.__bakeTargetWidth = targetWidth;
+  page.__bakeTargetHeight = targetHeight;
+  page.__bakeDpr = dpr;
+  
   await page.setViewport(viewport);
 
   const fileUrl = pathToFileURL(htmlPath).href;
   await page.goto(fileUrl, { waitUntil: 'networkidle0' });
   await waitForRenderStability(page);
+
+  // 计算页面实际内容尺寸（逻辑像素），用于长页面布局与背景截图。
+  const contentSize = await page.evaluate(() => {
+    const body = document.body;
+    const html = document.documentElement;
+    return {
+      width: Math.max(
+        body ? body.scrollWidth : 0,
+        body ? body.offsetWidth : 0,
+        html ? html.clientWidth : 0,
+        html ? html.scrollWidth : 0,
+        html ? html.offsetWidth : 0
+      ),
+      height: Math.max(
+        body ? body.scrollHeight : 0,
+        body ? body.offsetHeight : 0,
+        html ? html.clientHeight : 0,
+        html ? html.scrollHeight : 0,
+        html ? html.offsetHeight : 0
+      ),
+    };
+  });
+  const finalLogicalWidth = viewport.width;
+  const finalLogicalHeight = Math.max(viewport.height, contentSize.height);
+  console.log(`[布局分析] 页面逻辑高度: ${finalLogicalHeight}px (Viewport: ${viewport.height}px)`);
 
   page.__bakeMask = await detectFullScreenMask(page);
 
@@ -1817,10 +2015,22 @@ async function main() {
     throw new Error('No <body> element found in HTML.');
   }
 
+  // 生成全局参考图 bg.png（按页面实际逻辑高度截取）。
+  const bgPath = path.join(imagesDir, 'bg.png');
+  await page.screenshot({
+    path: bgPath,
+    clip: {
+      x: 0,
+      y: 0,
+      width: finalLogicalWidth,
+      height: finalLogicalHeight,
+    },
+    captureBeyondViewport: true,
+    omitBackground: false,
+  });
+  
+  // 处理 root selector（仅用于元素遍历，不影响背景截图）
   let rootHandle = bodyHandle;
-  let cropOffsetX = 0;
-  let cropOffsetY = 0;
-  let bgClip = null;
   const normalizedRootSelector = rootSelector ? rootSelector.toLowerCase() : '';
   if (rootSelector && normalizedRootSelector !== 'auto') {
     const selectedRoot = await page.$(rootSelector);
@@ -1828,43 +2038,11 @@ async function main() {
       throw new Error(`Root selector not found: ${rootSelector}`);
     }
     rootHandle = selectedRoot;
-    const rootRect = await getElementPageRect(page, rootHandle);
-    const clip = toScreenshotClip(rootRect);
-    if (!clip) {
-      throw new Error(`Root selector resolved to invalid bounds: ${rootSelector}`);
-    }
-    bgClip = clip;
-    cropOffsetX = clip.x;
-    cropOffsetY = clip.y;
   } else if (normalizedRootSelector === 'auto') {
     const autoRoot = await detectAutoRootHandle(page);
     if (autoRoot) {
-      const autoRect = await getElementPageRect(page, autoRoot);
-      const clip = toScreenshotClip(autoRect);
-      if (clip) {
-        rootHandle = autoRoot;
-        bgClip = clip;
-        cropOffsetX = clip.x;
-        cropOffsetY = clip.y;
-      } else {
-        await autoRoot.dispose();
-      }
+      rootHandle = autoRoot;
     }
-  }
-
-  const bgPath = path.join(imagesDir, 'bg.png');
-  if (bgClip) {
-    await page.screenshot({
-      path: bgPath,
-      clip: bgClip,
-      captureBeyondViewport: true,
-    });
-  } else {
-    await page.screenshot({
-      path: bgPath,
-      fullPage: true,
-      captureBeyondViewport: true,
-    });
   }
 
   const makeNodeId = createNodeIdFactory(idMode);
@@ -1881,9 +2059,19 @@ async function main() {
     parentId: 'root',
     childIndex: 0,
   });
-  if (bgClip) {
-    normalizeNodeCoordinates(layout, cropOffsetX, cropOffsetY);
+  
+  // Root 节点按页面实际内容高度（物理像素）定尺寸，避免长页面底部错位。
+  if (layout) {
+    layout.rect = {
+      x: 0,
+      y: 0,
+      width: Math.floor(finalLogicalWidth * dpr),
+      height: Math.floor(finalLogicalHeight * dpr),
+    };
+    layout.imagePath = 'images/bg.png';
+    layout.contentBounds = computeContentBounds(layout);
   }
+
   await fs.writeJson(path.join(outputDir, 'layout.json'), layout, { spaces: 2 });
 
   if (rootHandle !== bodyHandle) {

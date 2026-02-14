@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Text;
 using UnityEditor;
@@ -11,6 +10,7 @@ namespace HtmlToPrefab.Editor
     internal sealed class BakeRequest
     {
         public string HtmlAbsolutePath = string.Empty;
+        public string OutputFolderAssetPath = "Assets/Resources/UI";
         public string NodeExecutable = "node";
         public string RootSelector = string.Empty;
         public bool Debug;
@@ -33,6 +33,32 @@ namespace HtmlToPrefab.Editor
 
     internal static class BakePipeline
     {
+        public static BakeResult RunBake(
+            string htmlAbsolutePath,
+            string outputFolderAssetPath,
+            int width,
+            int height
+        )
+        {
+            var request = new BakeRequest
+            {
+                HtmlAbsolutePath = htmlAbsolutePath ?? string.Empty,
+                OutputFolderAssetPath = string.IsNullOrWhiteSpace(outputFolderAssetPath)
+                    ? "Assets/Resources/UI"
+                    : outputFolderAssetPath.Trim(),
+                ViewportWidth = Mathf.Max(1, width),
+                ViewportHeight = Mathf.Max(1, height),
+                NodeExecutable = "node",
+                RootSelector = "body",
+                Debug = false,
+                BakeRotation = false,
+                StableIds = true,
+                DeviceScaleFactor = 1f
+            };
+
+            return Run(request);
+        }
+
         public static BakeResult Run(BakeRequest request)
         {
             var result = new BakeResult();
@@ -57,7 +83,7 @@ namespace HtmlToPrefab.Editor
             }
 
             var bakerRoot = Path.Combine(projectRoot, "tool", "UIBaker");
-            var bakeScript = Path.Combine(bakerRoot, "bake_ui.js");
+            var bakeScript = Path.Combine(projectRoot, "tool", "src", "index.js");
             if (!File.Exists(bakeScript))
             {
                 result.Message = $"Missing bake script: {bakeScript}";
@@ -97,7 +123,16 @@ namespace HtmlToPrefab.Editor
 
             try
             {
-                var targetFolderAbs = Path.Combine(projectRoot, "Assets", "Resources", "UI", htmlName);
+                var outputBaseAssetPath = NormalizeAssetFolderPath(request.OutputFolderAssetPath);
+                if (!IsValidOutputFolder(outputBaseAssetPath))
+                {
+                    result.Message = $"Invalid output folder: {outputBaseAssetPath}. Must be under Assets/Resources and not a root folder.";
+                    result.Log = MergeLogs(nodeResult.StdOut, nodeResult.StdErr);
+                    return result;
+                }
+
+                var outputFolderAssetPath = EnsureBakeSubfolder(outputBaseAssetPath, htmlName);
+                var targetFolderAbs = AssetPathUtil.ToAbsolutePath(outputFolderAssetPath);
                 SyncDirectory(tempOutput, targetFolderAbs);
 
                 var uiFolderAssetPath = ToAssetPath(projectRoot, targetFolderAbs);
@@ -110,12 +145,25 @@ namespace HtmlToPrefab.Editor
                 var uiIndexAssetPath = LayoutIndexBuilder.WriteIndex(layoutRoot, htmlName, uiFolderAssetPath);
                 AssetDatabase.ImportAsset(uiIndexAssetPath, ImportAssetOptions.ForceSynchronousImport);
 
+                var prefabWidth = Mathf.Max(
+                    1,
+                    Mathf.RoundToInt(layoutRoot.rect != null && layoutRoot.rect.width > 0f
+                        ? layoutRoot.rect.width
+                        : request.ViewportWidth)
+                );
+                var prefabHeight = Mathf.Max(
+                    1,
+                    Mathf.RoundToInt(layoutRoot.rect != null && layoutRoot.rect.height > 0f
+                        ? layoutRoot.rect.height
+                        : request.ViewportHeight)
+                );
+
                 var prefabAssetPath = PrefabBuilder.Build(
                     layoutRoot,
                     htmlName,
                     uiFolderAssetPath,
-                    request.ViewportWidth,
-                    request.ViewportHeight
+                    prefabWidth,
+                    prefabHeight
                 );
                 AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
@@ -147,10 +195,9 @@ namespace HtmlToPrefab.Editor
                 Quote(bakeScriptPath),
                 Quote(htmlPath),
                 Quote($"--output-dir={outputDir}"),
-                $"--viewport-width={Mathf.Max(1, request.ViewportWidth)}",
-                $"--viewport-height={Mathf.Max(1, request.ViewportHeight)}",
-                $"--device-scale-factor={Mathf.Max(0.01f, request.DeviceScaleFactor).ToString("0.###", CultureInfo.InvariantCulture)}",
-                request.StableIds ? "--id-mode=stable" : "--id-mode=uuid"
+                $"--width={Mathf.Max(1, request.ViewportWidth)}",
+                $"--height={Mathf.Max(1, request.ViewportHeight)}",
+                "--root-selector=body"
             };
 
             if (request.Debug)
@@ -158,17 +205,47 @@ namespace HtmlToPrefab.Editor
                 args.Add("--debug");
             }
 
-            if (request.BakeRotation)
-            {
-                args.Add("--bake-rotation");
-            }
-
-            if (!string.IsNullOrWhiteSpace(request.RootSelector))
-            {
-                args.Add(Quote($"--root-selector={request.RootSelector.Trim()}"));
-            }
-
             return string.Join(" ", args);
+        }
+
+        private static string NormalizeAssetFolderPath(string assetPath)
+        {
+            var normalized = (assetPath ?? string.Empty).Trim().Replace('\\', '/');
+            if (string.IsNullOrEmpty(normalized))
+            {
+                return "Assets/Resources/UI";
+            }
+
+            while (normalized.EndsWith("/", StringComparison.Ordinal))
+            {
+                normalized = normalized.Substring(0, normalized.Length - 1);
+            }
+
+            return normalized;
+        }
+
+        private static bool IsValidOutputFolder(string assetPath)
+        {
+            if (string.IsNullOrWhiteSpace(assetPath)) return false;
+            if (!assetPath.StartsWith("Assets/Resources", StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.Equals(assetPath, "Assets", StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.Equals(assetPath, "Assets/Resources", StringComparison.OrdinalIgnoreCase)) return false;
+            return true;
+        }
+
+        private static string EnsureBakeSubfolder(string outputBaseAssetPath, string htmlName)
+        {
+            var basePath = NormalizeAssetFolderPath(outputBaseAssetPath);
+            var name = SanitizeName(htmlName);
+            if (string.IsNullOrWhiteSpace(name)) return basePath;
+
+            var suffix = "/" + name;
+            if (basePath.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return basePath;
+            }
+
+            return $"{basePath}/{name}".Replace('\\', '/');
         }
 
         private static string MergeLogs(string stdout, string stderr)
