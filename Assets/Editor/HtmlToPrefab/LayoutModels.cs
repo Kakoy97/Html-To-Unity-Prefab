@@ -53,8 +53,6 @@ namespace HtmlToPrefab.Editor
         public float contentOffsetY;
         public float contentWidth;
         public float contentHeight;
-        public float visibilityRatio;
-        public bool rotationNeutralized;
     }
 
     [Serializable]
@@ -63,7 +61,6 @@ namespace HtmlToPrefab.Editor
         public string id;
         public string type;
         public string htmlTag;
-        public int zIndex;
         public string role;
         public string inputType;
         public List<string> classes;

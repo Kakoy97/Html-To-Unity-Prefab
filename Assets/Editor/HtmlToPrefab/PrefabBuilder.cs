@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using HtmlToPrefab.Runtime;
 using TMPro;
@@ -84,27 +83,11 @@ namespace HtmlToPrefab.Editor
         private static void BuildChildren(LayoutNode node, RectTransform parent, LayoutRect parentRectAbs, string uiFolderAssetPath)
         {
             if (node == null || node.children == null) return;
-            var ordered = new List<KeyValuePair<LayoutNode, int>>();
-            for (var i = 0; i < node.children.Count; i++)
+            for (var i = node.children.Count - 1; i >= 0; i--)
             {
                 var child = node.children[i];
                 if (child == null) continue;
-                ordered.Add(new KeyValuePair<LayoutNode, int>(child, i));
-            }
-
-            ordered.Sort((lhs, rhs) =>
-            {
-                var zCompare = lhs.Key.zIndex.CompareTo(rhs.Key.zIndex);
-                if (zCompare != 0) return zCompare;
-
-                var lhsDomOrder = node.children.Count - 1 - lhs.Value;
-                var rhsDomOrder = node.children.Count - 1 - rhs.Value;
-                return lhsDomOrder.CompareTo(rhsDomOrder);
-            });
-
-            for (var i = 0; i < ordered.Count; i++)
-            {
-                BuildNode(ordered[i].Key, parent, parentRectAbs, uiFolderAssetPath);
+                BuildNode(child, parent, parentRectAbs, uiFolderAssetPath);
             }
         }
 
@@ -119,8 +102,10 @@ namespace HtmlToPrefab.Editor
             var rect = node.rect ?? new LayoutRect();
             ConfigureRect(rt, parentRectAbs, rect, parentRectAbs);
             var visualRt = EnsureVisualRoot(rt, rect);
-
-            var hasImageSprite = false;
+            if (Mathf.Abs(node.rotation) > 0.001f)
+            {
+                visualRt.localRotation = Quaternion.Euler(0f, 0f, -node.rotation);
+            }
 
             if (!string.IsNullOrEmpty(node.imagePath))
             {
@@ -132,7 +117,6 @@ namespace HtmlToPrefab.Editor
                     img.sprite = sprite;
                     img.raycastTarget = false;
                     img.preserveAspect = false;
-                    hasImageSprite = true;
                 }
             }
 
@@ -140,20 +124,6 @@ namespace HtmlToPrefab.Editor
             {
                 var text = visualRt.gameObject.AddComponent<TextMeshProUGUI>();
                 ApplyTextStyle(text, node);
-            }
-
-            if (Mathf.Abs(node.rotation) > 0.001f)
-            {
-                if (hasImageSprite)
-                {
-                    ConfigureRotationPivotFromCapture(visualRt, rect, node.capture);
-                }
-                else
-                {
-                    SetVisualPivotPreserveTopLeft(visualRt, 0.5f, 0.5f);
-                }
-
-                visualRt.localRotation = Quaternion.Euler(0f, 0f, -node.rotation);
             }
 
             BuildChildren(node, rt, rect, uiFolderAssetPath);
@@ -249,65 +219,6 @@ namespace HtmlToPrefab.Editor
 
             visualRt.sizeDelta = new Vector2(imageWidth, imageHeight);
             visualRt.anchoredPosition = new Vector2(-offsetX, offsetY);
-        }
-
-        private static void ConfigureRotationPivotFromCapture(RectTransform visualRt, LayoutRect nodeRect, LayoutCaptureInfo capture)
-        {
-            if (visualRt == null)
-            {
-                return;
-            }
-
-            if (capture == null || capture.imageWidth <= 0f || capture.imageHeight <= 0f ||
-                capture.contentWidth <= 0f || capture.contentHeight <= 0f)
-            {
-                SetVisualPivotPreserveTopLeft(visualRt, 0.5f, 0.5f);
-                return;
-            }
-
-            var contentCenterXFromLeft = capture.contentOffsetX + capture.contentWidth * 0.5f;
-            var contentCenterYFromTop = capture.contentOffsetY + capture.contentHeight * 0.5f;
-
-            if (capture.rotationNeutralized && nodeRect != null && nodeRect.width > 0f && nodeRect.height > 0f)
-            {
-                var targetCenterX = nodeRect.width * 0.5f;
-                var targetCenterYFromTop = nodeRect.height * 0.5f;
-                var deltaX = targetCenterX - contentCenterXFromLeft;
-                var deltaYFromTop = targetCenterYFromTop - contentCenterYFromTop;
-                visualRt.anchoredPosition = new Vector2(
-                    visualRt.anchoredPosition.x + deltaX,
-                    visualRt.anchoredPosition.y - deltaYFromTop
-                );
-                contentCenterXFromLeft += deltaX;
-                contentCenterYFromTop += deltaYFromTop;
-            }
-
-            var pivotX = contentCenterXFromLeft / Mathf.Max(1f, capture.imageWidth);
-            var pivotY = 1f - (contentCenterYFromTop / Mathf.Max(1f, capture.imageHeight));
-            SetVisualPivotPreserveTopLeft(visualRt, pivotX, pivotY);
-        }
-
-        private static void SetVisualPivotPreserveTopLeft(RectTransform visualRt, float pivotX, float pivotY)
-        {
-            if (visualRt == null)
-            {
-                return;
-            }
-
-            var clampedPivotX = Mathf.Clamp01(pivotX);
-            var clampedPivotY = Mathf.Clamp01(pivotY);
-            var size = visualRt.sizeDelta;
-            var previousPivot = visualRt.pivot;
-            var topLeft = new Vector2(
-                visualRt.anchoredPosition.x - previousPivot.x * size.x,
-                visualRt.anchoredPosition.y + (1f - previousPivot.y) * size.y
-            );
-
-            visualRt.pivot = new Vector2(clampedPivotX, clampedPivotY);
-            visualRt.anchoredPosition = new Vector2(
-                topLeft.x + clampedPivotX * size.x,
-                topLeft.y - (1f - clampedPivotY) * size.y
-            );
         }
 
         private static Sprite LoadSprite(string uiFolderAssetPath, string relativeImagePath)
