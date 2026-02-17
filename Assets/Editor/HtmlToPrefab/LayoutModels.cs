@@ -66,15 +66,18 @@ namespace HtmlToPrefab.Editor
         public List<string> classes;
         public List<LayoutAttribute> attrs;
         public string domPath;
+        public int childIndex;
         public LayoutRect rect;
         public LayoutRect contentBounds;
         public float rotation;
+        public float zIndex;
         public bool transformNeutralized;
         public int neutralizedAncestorCount;
         public List<LayoutNode> children;
 
         public string imagePath;
         public LayoutCaptureInfo capture;
+        public float renderOpacity = 1f;
         public bool rotationBaked;
         public float rotationOriginal;
 
@@ -111,6 +114,18 @@ namespace HtmlToPrefab.Editor
             if (node.classes == null) node.classes = new List<string>();
             if (node.attrs == null) node.attrs = new List<LayoutAttribute>();
             if (node.capture == null) node.capture = new LayoutCaptureInfo();
+            if (float.IsNaN(node.renderOpacity) || float.IsInfinity(node.renderOpacity))
+            {
+                node.renderOpacity = 1f;
+            }
+            else
+            {
+                node.renderOpacity = Mathf.Clamp01(node.renderOpacity);
+                if (node.renderOpacity <= 0f)
+                {
+                    node.renderOpacity = 1f;
+                }
+            }
             for (var i = 0; i < node.children.Count; i++)
             {
                 Normalize(node.children[i]);

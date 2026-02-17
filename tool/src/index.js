@@ -80,6 +80,39 @@ function countNodes(node) {
   return total;
 }
 
+async function openHtmlWithFallback(
+  page,
+  fileUrl,
+  navigationTimeoutMs,
+  loadSettleTimeoutMs,
+  disableNavLoadTimeoutFallback,
+) {
+  if (disableNavLoadTimeoutFallback) {
+    await page.goto(fileUrl, {
+      waitUntil: 'load',
+      timeout: navigationTimeoutMs,
+    });
+    return;
+  }
+
+  await page.goto(fileUrl, {
+    waitUntil: 'domcontentloaded',
+    timeout: navigationTimeoutMs,
+  });
+
+  try {
+    await page.waitForFunction(
+      () => document.readyState === 'complete',
+      { timeout: loadSettleTimeoutMs },
+    );
+  } catch (_) {
+    logger.warn(
+      `[nav-load-timeout-fallback] readyState incomplete after ${loadSettleTimeoutMs}ms; ` +
+      'continue after domcontentloaded.',
+    );
+  }
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const parsedArgs = Context.parseArgv(argv);
@@ -103,7 +136,13 @@ async function main() {
     const htmlPath = resolveHtmlPath(parsedArgs);
     assertFileExists(htmlPath);
     logger.info(`Loading: ${htmlPath}`);
-    await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' });
+    await openHtmlWithFallback(
+      page,
+      pathToFileURL(htmlPath).href,
+      config.navigationTimeoutMs,
+      config.navigationLoadSettleTimeoutMs,
+      config.disableNavLoadTimeoutFallback,
+    );
 
     logger.step('Measure Content Size');
     const contentSize = await getPageContentSize(page);
@@ -127,10 +166,14 @@ async function main() {
     logger.step('Task Planning');
     const tasks = planner.plan(analysisRoot);
     const planPath = path.join(debugDir, 'bake_plan.json');
+    const rulesTracePath = path.join(debugDir, 'rules_trace.json');
     await fsExtra.ensureDir(path.dirname(planPath));
     await fsExtra.writeJson(planPath, tasks, { spaces: 2 });
+    const rulesTrace = typeof planner.getRuleTrace === 'function' ? planner.getRuleTrace() : [];
+    await fsExtra.writeJson(rulesTracePath, rulesTrace, { spaces: 2 });
     logger.info(`[Planner] Plan generated. Total tasks: ${tasks.length}`);
     logger.info(`[Planner] Output: ${planPath}`);
+    logger.info(`[Planner] Rules Trace: ${rulesTracePath}`);
 
     logger.step('Asset Baking');
     const bakeResult = await baker.run(page, tasks);

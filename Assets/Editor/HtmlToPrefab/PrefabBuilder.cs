@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using HtmlToPrefab.Runtime;
 using TMPro;
 using UnityEditor;
@@ -83,9 +84,22 @@ namespace HtmlToPrefab.Editor
         private static void BuildChildren(LayoutNode node, RectTransform parent, LayoutRect parentRectAbs, string uiFolderAssetPath)
         {
             if (node == null || node.children == null) return;
-            for (var i = node.children.Count - 1; i >= 0; i--)
+            var orderedChildren = node.children
+                .Select((child, index) => new
+                {
+                    Child = child,
+                    Index = index,
+                    ZOrder = child != null ? child.zIndex : 0f,
+                    DomOrder = child != null ? child.childIndex : index,
+                })
+                .OrderBy((entry) => entry.ZOrder)
+                .ThenBy((entry) => entry.DomOrder)
+                .ThenBy((entry) => entry.Index)
+                .ToList();
+
+            for (var i = 0; i < orderedChildren.Count; i++)
             {
-                var child = node.children[i];
+                var child = orderedChildren[i].Child;
                 if (child == null) continue;
                 BuildNode(child, parent, parentRectAbs, uiFolderAssetPath);
             }
@@ -102,7 +116,7 @@ namespace HtmlToPrefab.Editor
             var rect = node.rect ?? new LayoutRect();
             ConfigureRect(rt, parentRectAbs, rect, parentRectAbs);
             var visualRt = EnsureVisualRoot(rt, rect);
-            if (Mathf.Abs(node.rotation) > 0.001f)
+            if (!node.rotationBaked && Mathf.Abs(node.rotation) > 0.001f)
             {
                 visualRt.localRotation = Quaternion.Euler(0f, 0f, -node.rotation);
             }
@@ -117,6 +131,13 @@ namespace HtmlToPrefab.Editor
                     img.sprite = sprite;
                     img.raycastTarget = false;
                     img.preserveAspect = false;
+                    var renderOpacity = ResolveRenderOpacity(node);
+                    if (renderOpacity < 0.999f)
+                    {
+                        var color = img.color;
+                        color.a = Mathf.Clamp01(color.a * renderOpacity);
+                        img.color = color;
+                    }
                 }
             }
 
@@ -219,6 +240,15 @@ namespace HtmlToPrefab.Editor
 
             visualRt.sizeDelta = new Vector2(imageWidth, imageHeight);
             visualRt.anchoredPosition = new Vector2(-offsetX, offsetY);
+        }
+
+        private static float ResolveRenderOpacity(LayoutNode node)
+        {
+            if (node == null) return 1f;
+            var value = node.renderOpacity;
+            if (float.IsNaN(value) || float.IsInfinity(value)) return 1f;
+            if (value <= 0f) return 1f;
+            return Mathf.Clamp01(value);
         }
 
         private static Sprite LoadSprite(string uiFolderAssetPath, string relativeImagePath)

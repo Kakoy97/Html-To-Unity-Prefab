@@ -57,6 +57,14 @@ class Assembler {
 
   _transformNode(node, imageMap, captureMap) {
     if (!node) return null;
+    const captureInfo = this._extractCaptureInfo(node, captureMap);
+    const rotationBaked = !!(captureInfo && captureInfo.rotationBaked);
+    const rotationOriginal = this._toNumber(
+      rotationBaked
+        ? captureInfo.rotationOriginal
+        : (node.rotationOriginal != null ? node.rotationOriginal : node.rotation),
+      0,
+    );
 
     const layoutNode = {
       id: node.id || '',
@@ -68,17 +76,20 @@ class Assembler {
       classes: Array.isArray(node.classes) ? node.classes : [],
       attrs: Array.isArray(node.attrs) ? node.attrs : [],
       domPath: node.domPath || '',
+      childIndex: this._toInteger(node.childIndex, 0),
       rect: this._copyRect(node.rect),
       contentBounds: node.contentBounds ? this._copyRect(node.contentBounds) : null,
       rotation: this._toNumber(node.rotation, 0),
+      zIndex: this._extractZIndex(node),
       transformNeutralized: !!node.transformNeutralized,
       neutralizedAncestorCount: this._toInteger(node.neutralizedAncestorCount, 0),
       text: typeof node.text === 'string' ? node.text : '',
       style: this._extractStyle(node),
       imagePath: imageMap.get(node.id) || node.imagePath || null,
-      capture: this._extractCaptureInfo(node, captureMap),
-      rotationBaked: !!node.rotationBaked,
-      rotationOriginal: this._toNumber(node.rotationOriginal, 0),
+      capture: captureInfo,
+      renderOpacity: this._extractRenderOpacity(captureInfo),
+      rotationBaked: rotationBaked || !!node.rotationBaked,
+      rotationOriginal,
       children: [],
     };
 
@@ -116,6 +127,10 @@ class Assembler {
     const contentWidth = this._toNumber(source.contentWidth, 0);
     const contentHeight = this._toNumber(source.contentHeight, 0);
     const mode = source.mode ? String(source.mode) : '';
+    const rotationBaked = !!source.rotationBaked;
+    const rotationOriginal = this._toNumber(source.rotationOriginal, 0);
+    const opacityDecoupled = !!source.opacityDecoupled;
+    const renderOpacity = this._toNumber(source.renderOpacity, 1);
 
     if (imageWidth <= 0 || imageHeight <= 0) return null;
 
@@ -127,7 +142,20 @@ class Assembler {
       contentOffsetY,
       contentWidth: contentWidth > 0 ? contentWidth : 0,
       contentHeight: contentHeight > 0 ? contentHeight : 0,
+      rotationBaked,
+      rotationOriginal,
+      opacityDecoupled,
+      renderOpacity,
     };
+  }
+
+  _extractRenderOpacity(captureInfo) {
+    if (!captureInfo || !captureInfo.opacityDecoupled) return 1;
+    const opacity = this._toNumber(captureInfo.renderOpacity, 1);
+    if (!Number.isFinite(opacity)) return 1;
+    if (opacity <= 0) return 0;
+    if (opacity >= 1) return 1;
+    return opacity;
   }
 
   _computeContentBounds(node) {
@@ -187,6 +215,19 @@ class Assembler {
       return node.styles.font;
     }
     return null;
+  }
+
+  _extractZIndex(node) {
+    if (!node) return 0;
+    const fromNode = this._toNumber(node.zIndex, NaN);
+    if (Number.isFinite(fromNode)) return fromNode;
+    const styles = node.styles && typeof node.styles === 'object' ? node.styles : null;
+    if (!styles) return 0;
+    const raw = styles.zIndex;
+    if (raw == null || raw === '' || raw === 'auto') return 0;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return 0;
+    return parsed;
   }
 
   _copyRect(rect) {

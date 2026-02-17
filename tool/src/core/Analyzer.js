@@ -84,19 +84,45 @@ class Analyzer {
   }
 
   async _waitForRenderStability(page) {
-    await page.evaluate(async () => {
+    const config = this.context && this.context.config ? this.context.config : {};
+    const fontsReadyTimeoutMs = this._toPositiveInt(config.fontsReadyTimeoutMs, 2500);
+
+    await page.evaluate(async (fontTimeoutMs) => {
+      const waitWithTimeout = async (promise, timeoutMs) => new Promise((resolve, reject) => {
+        let done = false;
+        const timer = setTimeout(() => {
+          if (done) return;
+          done = true;
+          reject(new Error('fonts-ready-timeout'));
+        }, Math.max(1, timeoutMs));
+
+        Promise.resolve(promise)
+          .then((value) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            resolve(value);
+          })
+          .catch((error) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            reject(error);
+          });
+      });
+
       if (document.fonts && document.fonts.ready) {
         try {
-          await document.fonts.ready;
+          await waitWithTimeout(document.fonts.ready, fontTimeoutMs);
         } catch (_) {
-          // Continue even if the font ready promise rejects.
+          // Continue even if fonts are delayed/rejected.
         }
       }
 
       await new Promise((resolve) => requestAnimationFrame(resolve));
       await new Promise((resolve) => requestAnimationFrame(resolve));
       await new Promise((resolve) => setTimeout(resolve, 50));
-    });
+    }, fontsReadyTimeoutMs);
   }
 
   async _detectRoot(page) {
@@ -151,7 +177,7 @@ class Analyzer {
 
       const hasOverlayClass = (el) => {
         const cls = typeof el.className === 'string' ? el.className : '';
-        return /(?:^|\s)(?:overlay|mask|modal|backdrop|inset-0|bg-opacity-\d+|backdrop-blur-\w+)(?:\s|$)/i.test(cls);
+        return /(?:^|\s)(?:overlay|mask|modal|backdrop|bg-opacity-\d+|backdrop-blur-\w+)(?:\s|$)/i.test(cls);
       };
 
       const isInsetZero = (style) =>
@@ -172,20 +198,9 @@ class Analyzer {
         const rect = el.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) continue;
 
-        const offsetParent = el.offsetParent || el.parentElement;
-        const parentRect = offsetParent
-          ? offsetParent.getBoundingClientRect()
-          : {
-              width: viewportWidth,
-              height: viewportHeight,
-              left: 0,
-              top: 0,
-              right: viewportWidth,
-              bottom: viewportHeight,
-            };
-
         const coversViewport = rect.width >= viewportWidth * 0.9 && rect.height >= viewportHeight * 0.9;
-        const coversParent = rect.width >= parentRect.width * 0.9 && rect.height >= parentRect.height * 0.9;
+        const viewportArea = Math.max(1, viewportWidth * viewportHeight);
+        const areaRatio = (rect.width * rect.height) / viewportArea;
 
         const hasBackground =
           !isTransparentColor(style.backgroundColor) ||
@@ -204,10 +219,20 @@ class Analyzer {
           (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none');
         if (!hasBackground && !hasOpacity && !hasBackdrop) continue;
 
-        const overlayLike = coversViewport || coversParent || isInsetZero(style) || hasOverlayClass(el) || isTranslucent;
-        if (!overlayLike) continue;
-
         const zIndex = getEffectiveZ(el);
+        const isViewportScale = coversViewport || areaRatio >= 0.7;
+        const globalOverlayLike =
+          isViewportScale &&
+          (
+            style.position === 'fixed' ||
+            isInsetZero(style) ||
+            hasOverlayClass(el) ||
+            hasBackdrop ||
+            isTranslucent ||
+            zIndex >= 100
+          );
+        if (!globalOverlayLike) continue;
+
         candidates.push({
           el,
           zIndex,
@@ -254,10 +279,14 @@ class Analyzer {
     const isRootBody = info.tagName === 'BODY';
     const isMaskLayer = info.isMaskLayer === true;
     const isAtomicImageTag = ['IMG', 'SVG', 'CANVAS', 'VIDEO', 'PICTURE'].includes(info.tagName);
+    const isRangeInput = info.htmlTag === 'input' && info.inputType === 'range';
+    const hasRangeParts = isRangeInput && Array.isArray(info.rangeParts) && info.rangeParts.length > 0;
     const isVisual = info.hasVisual || isAtomicImageTag || info.isIconGlyph;
 
     let type = 'Container';
     if (isRootBody || isMaskLayer) {
+      type = 'Container';
+    } else if (hasRangeParts) {
       type = 'Container';
     } else if (isAtomicImageTag || info.isIconGlyph) {
       type = 'Image';
@@ -295,8 +324,9 @@ class Analyzer {
       domPath: info.domPath,
       rect: info.rect,
       styles: info.styles,
+      zIndex: info.zIndex,
       visual: {
-        hasVisual: !!info.hasVisual,
+        hasVisual: hasRangeParts ? false : !!info.hasVisual,
         isMask: !!info.isMaskLayer,
         isIconGlyph: !!info.isIconGlyph,
       },
@@ -337,16 +367,58 @@ class Analyzer {
       });
     }
 
+    if (hasRangeParts) {
+      const rangeParts = info.rangeParts;
+      for (let idx = 0; idx < rangeParts.length; idx += 1) {
+        const part = rangeParts[idx];
+        if (!part || !part.rect) continue;
+        node.children.push({
+          id: createId(),
+          parentId: id,
+          childIndex: -(100 + idx),
+          type: 'Image',
+          tagName: 'DIV',
+          htmlTag: 'div',
+          role: '',
+          inputType: '',
+          classes: [`__range-part`, `__range-${part.name || 'part'}`],
+          attrs: [
+            { key: 'data-range-part', value: part.name || 'part' },
+            { key: 'data-range-source', value: id },
+          ],
+          domPath: `${info.domPath || ''}::range-${part.name || idx}`,
+          rect: part.rect,
+          styles: {
+            position: 'absolute',
+            zIndex: String((info.zIndex || 0) + (part.name === 'thumb' ? 0.1 : 0)),
+          },
+          zIndex: (info.zIndex || 0) + (part.name === 'thumb' ? 0.1 : 0),
+          visual: {
+            hasVisual: true,
+            isMask: false,
+            isIconGlyph: false,
+          },
+          rotation: info.rotation,
+          captureFrom: {
+            sourceNodeId: id,
+            rangePart: part.name || 'part',
+          },
+          children: [],
+        });
+      }
+    }
+
     const childHandles = await handle.$$(':scope > *');
     childHandles.reverse();
     for (let idx = 0; idx < childHandles.length; idx += 1) {
       const childHandle = childHandles[idx];
+      const domOrder = childHandles.length - 1 - idx;
       if (isAtomicImageTag) {
         await childHandle.dispose();
         continue;
       }
 
-      const childNode = await this._traverse(page, childHandle, id, idx);
+      const childNode = await this._traverse(page, childHandle, id, domOrder);
       if (childNode) {
         node.children.push(childNode);
       }
@@ -454,6 +526,26 @@ class Analyzer {
         const inputType = htmlTag === 'input'
           ? ((getAttr('type') || 'text').trim().toLowerCase() || 'text')
           : '';
+        const isRangeInput = htmlTag === 'input' && inputType === 'range';
+
+        const toNumber = (value, fallback = 0) => {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : fallback;
+        };
+
+        const parsePx = (value, fallback = 0) => {
+          if (!value || value === 'normal') return fallback;
+          const match = String(value).match(/(-?\d*\.?\d+)px/);
+          if (!match) return fallback;
+          const parsed = parseFloat(match[1]);
+          return Number.isFinite(parsed) ? parsed : fallback;
+        };
+
+        const parseZIndex = (value) => {
+          if (!value || value === 'auto') return 0;
+          const parsed = parseFloat(value);
+          return Number.isFinite(parsed) ? parsed : 0;
+        };
 
         const parseRotation = (transform) => {
           if (!transform || transform === 'none') return 0;
@@ -507,7 +599,7 @@ class Analyzer {
           return width > 0 && borderStyle !== 'none' && borderStyle !== 'hidden';
         });
         const hasBoxShadow = style.boxShadow && style.boxShadow !== 'none';
-        const hasVisual = hasBackgroundColor || hasBackgroundImage || hasBorder || hasBoxShadow;
+        const hasVisual = hasBackgroundColor || hasBackgroundImage || hasBorder || hasBoxShadow || isRangeInput;
 
         const transitionProperty = (style.transitionProperty || '').toLowerCase();
         const hasVisibilityTransition =
@@ -605,6 +697,276 @@ class Analyzer {
           height: rect.height * devicePixelRatio,
         };
 
+        const buildRangeParts = () => {
+          if (!isRangeInput || rect.width <= 0 || rect.height <= 0) return [];
+          const splitSelectorList = (selectorText) => {
+            const text = String(selectorText || '');
+            const list = [];
+            let current = '';
+            let parenDepth = 0;
+            let bracketDepth = 0;
+            for (let i = 0; i < text.length; i += 1) {
+              const ch = text[i];
+              if (ch === '(') parenDepth += 1;
+              if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
+              if (ch === '[') bracketDepth += 1;
+              if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+              if (ch === ',' && parenDepth === 0 && bracketDepth === 0) {
+                if (current.trim()) list.push(current.trim());
+                current = '';
+              } else {
+                current += ch;
+              }
+            }
+            if (current.trim()) list.push(current.trim());
+            return list;
+          };
+
+          const collectPseudoRuleStyle = (pseudoName) => {
+            const merged = {};
+            const pseudoToken = `::${pseudoName}`;
+            const applyRuleStyle = (styleDecl) => {
+              if (!styleDecl) return;
+              for (let i = 0; i < styleDecl.length; i += 1) {
+                const prop = styleDecl[i];
+                const value = styleDecl.getPropertyValue(prop);
+                if (!prop || !value) continue;
+                merged[String(prop).toLowerCase()] = String(value).trim();
+              }
+            };
+            const matchSelector = (selectorText) => {
+              const selectors = splitSelectorList(selectorText);
+              for (const selector of selectors) {
+                if (!selector || !selector.includes(pseudoToken)) continue;
+                const idx = selector.indexOf(pseudoToken);
+                const baseSelector = `${selector.slice(0, idx)}${selector.slice(idx + pseudoToken.length)}`.trim();
+                if (!baseSelector) return true;
+                try {
+                  if (el.matches(baseSelector)) return true;
+                } catch (_) {
+                  // ignore invalid selector fragments
+                }
+              }
+              return false;
+            };
+            const walkRules = (rules) => {
+              if (!rules) return;
+              for (const rule of Array.from(rules)) {
+                if (!rule) continue;
+                if (rule.type === CSSRule.STYLE_RULE) {
+                  if (matchSelector(rule.selectorText || '')) {
+                    applyRuleStyle(rule.style);
+                  }
+                  continue;
+                }
+                if (rule.cssRules) {
+                  walkRules(rule.cssRules);
+                }
+              }
+            };
+            for (const sheet of Array.from(document.styleSheets || [])) {
+              try {
+                walkRules(sheet.cssRules);
+              } catch (_) {
+                // ignore cross-origin/inaccessible style sheets
+              }
+            }
+            return merged;
+          };
+
+          const parseBorderWidth = (styleMap, side) => {
+            const sideKey = `border-${side}-width`;
+            const sideValue = parsePx(styleMap[sideKey], NaN);
+            if (Number.isFinite(sideValue)) return Math.max(0, sideValue);
+            const borderValue = String(styleMap.border || '').trim();
+            const borderMatch = borderValue.match(/(-?\d*\.?\d+)px/);
+            if (!borderMatch) return 0;
+            const parsed = parseFloat(borderMatch[1]);
+            return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+          };
+
+          const parseBoxShadowPad = (boxShadow) => {
+            if (!boxShadow || boxShadow === 'none') return 0;
+            const parts = [];
+            let depth = 0;
+            let current = '';
+            for (const ch of String(boxShadow)) {
+              if (ch === '(') depth += 1;
+              if (ch === ')') depth = Math.max(0, depth - 1);
+              if (ch === ',' && depth === 0) {
+                parts.push(current);
+                current = '';
+              } else {
+                current += ch;
+              }
+            }
+            if (current.trim()) parts.push(current);
+
+            let maxPad = 0;
+            for (const part of parts) {
+              if (/\binset\b/i.test(part)) continue;
+              const values = part.match(/-?\d*\.?\d+px/g) || [];
+              const nums = values.map((v) => parseFloat(v));
+              const offsetX = nums[0] || 0;
+              const offsetY = nums[1] || 0;
+              const blur = nums[2] || 0;
+              const spread = nums[3] || 0;
+              const pad = Math.max(Math.abs(offsetX), Math.abs(offsetY)) + blur + spread;
+              if (pad > maxPad) maxPad = pad;
+            }
+            return maxPad;
+          };
+
+          const isTransparentColor = (value) => {
+            if (!value) return true;
+            const normalized = String(value).trim().toLowerCase();
+            return normalized === 'transparent' ||
+              normalized === 'rgba(0, 0, 0, 0)' ||
+              normalized === 'rgba(0,0,0,0)';
+          };
+
+          const resolvePseudoStyle = (pseudoName, props) => {
+            const computed = window.getComputedStyle(el, `::${pseudoName}`);
+            const computedMap = {};
+            for (const prop of props) {
+              const key = String(prop).toLowerCase();
+              computedMap[key] = computed.getPropertyValue(key) || '';
+            }
+            const ruleMap = collectPseudoRuleStyle(pseudoName);
+
+            const computedWidth = parsePx(computedMap.width, NaN);
+            const computedHeight = parsePx(computedMap.height, NaN);
+            const borderSum = parseBorderWidth(computedMap, 'top') +
+              parseBorderWidth(computedMap, 'right') +
+              parseBorderWidth(computedMap, 'bottom') +
+              parseBorderWidth(computedMap, 'left');
+            const noVisualPaint = isTransparentColor(computedMap['background-color']) &&
+              (!computedMap['background-image'] || computedMap['background-image'] === 'none') &&
+              borderSum <= 0.01 &&
+              parseBoxShadowPad(computedMap['box-shadow']) <= 0.01;
+            const looksLikeInputRect = Number.isFinite(computedWidth) &&
+              Number.isFinite(computedHeight) &&
+              Math.abs(computedWidth - rect.width) <= 0.5 &&
+              Math.abs(computedHeight - rect.height) <= 0.5;
+            const useRuleFallback = looksLikeInputRect && noVisualPaint;
+
+            const resolved = {};
+            for (const prop of props) {
+              const key = String(prop).toLowerCase();
+              const computedValue = computedMap[key] || '';
+              const ruleValue = ruleMap[key] || '';
+              resolved[key] = useRuleFallback
+                ? (ruleValue || computedValue)
+                : (computedValue || ruleValue);
+            }
+            return resolved;
+          };
+
+          const trackStyle = resolvePseudoStyle('-webkit-slider-runnable-track', [
+            'width',
+            'height',
+            'border',
+            'border-top-width',
+            'border-right-width',
+            'border-bottom-width',
+            'border-left-width',
+            'box-shadow',
+            'margin-top',
+            'background',
+            'background-color',
+            'background-image',
+          ]);
+          const thumbStyle = resolvePseudoStyle('-webkit-slider-thumb', [
+            'width',
+            'height',
+            'border',
+            'border-top-width',
+            'border-right-width',
+            'border-bottom-width',
+            'border-left-width',
+            'box-shadow',
+            'margin-top',
+            'background',
+            'background-color',
+            'background-image',
+          ]);
+
+          const min = toNumber(el.min, 0);
+          const max = toNumber(el.max, 100);
+          const value = toNumber(el.value, min);
+          const span = Math.max(0.0001, max - min);
+          const ratio = Math.min(1, Math.max(0, (value - min) / span));
+
+          const trackHeightRaw = parsePx(trackStyle.height, rect.height);
+          const trackBorderTop = parseBorderWidth(trackStyle, 'top');
+          const trackBorderBottom = parseBorderWidth(trackStyle, 'bottom');
+          const trackBorderLeft = parseBorderWidth(trackStyle, 'left');
+          const trackBorderRight = parseBorderWidth(trackStyle, 'right');
+          const trackHeight = Math.max(1, trackHeightRaw + trackBorderTop + trackBorderBottom);
+          const trackWidth = Math.max(1, rect.width);
+          const trackX = rect.left;
+          const trackY = rect.top + (rect.height - trackHeight) / 2;
+
+          const thumbWidth = Math.max(1, parsePx(thumbStyle.width, NaN));
+          const thumbHeight = Math.max(1, parsePx(thumbStyle.height, NaN));
+          const thumbBorderTop = parseBorderWidth(thumbStyle, 'top');
+          const thumbBorderBottom = parseBorderWidth(thumbStyle, 'bottom');
+          const thumbBorderLeft = parseBorderWidth(thumbStyle, 'left');
+          const thumbBorderRight = parseBorderWidth(thumbStyle, 'right');
+
+          let resolvedThumbWidth = thumbWidth;
+          let resolvedThumbHeight = thumbHeight;
+          const fallbackThumbWidth = Math.max(8, (trackHeightRaw > 0 ? trackHeightRaw : trackHeight) * 2);
+          const fallbackThumbHeight = Math.max(12, (trackHeightRaw > 0 ? trackHeightRaw : trackHeight) * 3);
+          if (!Number.isFinite(resolvedThumbWidth) || resolvedThumbWidth <= 0 || resolvedThumbWidth >= trackWidth * 0.8) {
+            resolvedThumbWidth = fallbackThumbWidth;
+          }
+          if (!Number.isFinite(resolvedThumbHeight) || resolvedThumbHeight <= 0 || resolvedThumbHeight >= Math.max(rect.height * 4, trackHeight * 6)) {
+            resolvedThumbHeight = fallbackThumbHeight;
+          }
+          resolvedThumbWidth += thumbBorderLeft + thumbBorderRight;
+          resolvedThumbHeight += thumbBorderTop + thumbBorderBottom;
+
+          const thumbMarginTop = parsePx(thumbStyle['margin-top'], 0);
+          const safeThumbMarginTop =
+            Number.isFinite(thumbMarginTop) && Math.abs(thumbMarginTop) <= Math.max(rect.height * 4, trackHeight * 6)
+              ? thumbMarginTop
+              : 0;
+          const hasExplicitThumbMarginTop = Number.isFinite(thumbMarginTop) && Math.abs(thumbMarginTop) > 0.001;
+          // In Chromium, range thumb vertical placement follows margin-top semantics
+          // more closely than pure center alignment when author CSS sets margin-top.
+          const trackContentTop = rect.top + (rect.height - trackHeightRaw) / 2 + trackBorderTop;
+          const thumbTravel = Math.max(0, trackWidth - trackBorderLeft - trackBorderRight - resolvedThumbWidth);
+          const thumbX = trackX + trackBorderLeft + ratio * thumbTravel;
+          const thumbY = hasExplicitThumbMarginTop
+            ? (trackContentTop + safeThumbMarginTop)
+            : (trackY + (trackHeight - resolvedThumbHeight) / 2);
+
+          const trackShadowPad = parseBoxShadowPad(trackStyle['box-shadow']);
+          const thumbShadowPad = parseBoxShadowPad(thumbStyle['box-shadow']);
+
+          const toPhysicalRect = (x, y, width, height, shadowPad = 0) => ({
+            x: (x - shadowPad + window.scrollX) * devicePixelRatio,
+            y: (y - shadowPad + window.scrollY) * devicePixelRatio,
+            width: Math.max(1, (width + shadowPad * 2) * devicePixelRatio),
+            height: Math.max(1, (height + shadowPad * 2) * devicePixelRatio),
+          });
+
+          return [
+            {
+              name: 'track',
+              rect: toPhysicalRect(trackX, trackY, trackWidth, trackHeight, trackShadowPad),
+            },
+            {
+              name: 'thumb',
+              rect: toPhysicalRect(thumbX, thumbY, resolvedThumbWidth, resolvedThumbHeight, thumbShadowPad),
+            },
+          ];
+        };
+
+        const rangeParts = buildRangeParts();
+        const zIndex = parseZIndex(style.zIndex);
+
         const physicalFontSize = parseCssPxToPhysical(style.fontSize);
         const physicalLineHeight = parseCssPxToPhysical(style.lineHeight);
         const physicalLetterSpacing = parseCssPxToPhysical(style.letterSpacing);
@@ -616,6 +978,7 @@ class Analyzer {
           border: style.border,
           borderRadius: style.borderRadius,
           boxShadow: style.boxShadow,
+          filter: style.filter,
           opacity: style.opacity,
           display: style.display,
           visibility: style.visibility,
@@ -673,12 +1036,14 @@ class Analyzer {
           hasText: text.length > 0,
           hasDirectText: directText.length > 0,
           rotation,
+          zIndex,
           font,
           styles: computedStyles,
           childCount: el.children.length,
           directText,
           directTextRaw,
           directTextRect,
+          rangeParts,
         };
       },
       dpr,
@@ -690,6 +1055,12 @@ class Analyzer {
     const dpr = Number(raw);
     if (!Number.isFinite(dpr) || dpr <= 0) return 1;
     return dpr;
+  }
+
+  _toPositiveInt(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
   }
 
   async _safeEvaluateOnHandle(handle, label, pageFunction, ...args) {

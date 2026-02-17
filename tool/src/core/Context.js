@@ -60,6 +60,21 @@ function buildResolutionConfig(args) {
   const outputDir = path.isAbsolute(outputDirArg)
     ? outputDirArg
     : path.resolve(process.cwd(), outputDirArg);
+  const enableOpacityDecouple = args['disable-opacity-decouple'] === true ? false : true;
+  const enableLowAlphaContextCapture = args['disable-low-alpha-context-capture'] === true ? false : true;
+  const enableBackgroundStackComposite = args['disable-background-stack-composite'] === true ? false : true;
+  const enableUnderlayFaintBorderSuppression =
+    args['disable-underlay-faint-border-suppression'] === true ? false : true;
+  const disableNavLoadTimeoutFallback = args['disable-nav-load-timeout-fallback'] === true;
+  const navigationTimeoutMs = Math.round(
+    toPositiveNumber(args['nav-timeout-ms'] || args['nav-timeout'], 30000),
+  );
+  const navigationLoadSettleTimeoutMs = Math.round(
+    toPositiveNumber(args['nav-load-settle-timeout-ms'] || args['load-settle-timeout-ms'], 4000),
+  );
+  const fontsReadyTimeoutMs = Math.round(
+    toPositiveNumber(args['fonts-ready-timeout-ms'], 2500),
+  );
 
   let mode = 'logical';
   let dpr = 2.0;
@@ -99,6 +114,14 @@ function buildResolutionConfig(args) {
       height: viewportHeight,
       deviceScaleFactor: dprRounded,
     },
+    enableOpacityDecouple,
+    enableLowAlphaContextCapture,
+    enableBackgroundStackComposite,
+    enableUnderlayFaintBorderSuppression,
+    disableNavLoadTimeoutFallback,
+    navigationTimeoutMs,
+    navigationLoadSettleTimeoutMs,
+    fontsReadyTimeoutMs,
   };
 }
 
