@@ -8,7 +8,7 @@
 3. [单张图片修复（Repair Pipeline）：设计、痛点、使用方式](#单张图片修复repair-pipeline设计痛点使用方式)
 4. [常见问题](#常见问题)
 
-## 从 0 开始部署工程
+## 从零开始部署工程
 
 ### 1. 环境要求
 - Unity：建议 2021.3 LTS 或更高（项目已使用 UGUI + TextMeshPro）。
@@ -80,7 +80,7 @@ Unity: HtmlBakeWindow
 4. 选择输出目录（必须在 `Assets/Resources/...` 下）。  
 5. 点击 `Bake`。  
 
-使用界面示意（占位，后续替换）：
+使用界面：
 ![通用生成入口](docs/images/readme/step01.png)
 ![操作界面](docs/images/readme/step02.png)
 
@@ -89,8 +89,8 @@ Unity: HtmlBakeWindow
 - 资源输出：`Assets/Resources/<你设置的目录>/<htmlName>/...`
 - Prefab：`Assets/Resources/Prefab/<htmlName>/<htmlName>.prefab`
 
-### 效果展示（占位，后续替换）
-![Unity Prefab Preview](docs/images/readme/step03.png)
+### 效果展示
+![还原效果](docs/images/readme/step03.png)
 
 ## 单张图片修复（Repair Pipeline）：设计、痛点、使用方式
 
@@ -125,7 +125,6 @@ Repair Pipeline 关键目录：
 4. 点击 `Apply This Variant` 覆盖原图并刷新资源。  
 5. 如需手调，在 `Manual Tuning` 中调 Brightness/Contrast/Saturation，点击 `Generate Preview`，确认后 `Apply Adjustments`。  
 
-使用界面示意（占位，后续替换）：
 ![单张修复入口](docs/images/readme/step04.png)
 ![智能修复模式](docs/images/readme/step05.png)
 ![色差调整模式](docs/images/readme/step06.png)
