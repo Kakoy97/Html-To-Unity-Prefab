@@ -7,12 +7,33 @@ namespace HtmlToPrefab.Editor
 {
     public sealed class HtmlBakeWindow : EditorWindow
     {
+        internal const string LastHtmlPathEditorPrefKey = "HtmlToPrefab.LastHtmlPath";
+        internal const string LastViewportWidthEditorPrefKey = "HtmlToPrefab.LastViewportWidth";
+        internal const string LastViewportHeightEditorPrefKey = "HtmlToPrefab.LastViewportHeight";
+
         private string _htmlPath = string.Empty;
         private string _uiFolder = "Assets/Resources/UI";
         private int _viewportWidth = 750;
         private int _viewportHeight = 1624;
         private Vector2 _logScroll;
         private string _logText = string.Empty;
+
+        private void OnEnable()
+        {
+            if (string.IsNullOrWhiteSpace(_htmlPath))
+            {
+                _htmlPath = EditorPrefs.GetString(LastHtmlPathEditorPrefKey, string.Empty);
+            }
+
+            _viewportWidth = Mathf.Max(
+                1,
+                EditorPrefs.GetInt(LastViewportWidthEditorPrefKey, _viewportWidth)
+            );
+            _viewportHeight = Mathf.Max(
+                1,
+                EditorPrefs.GetInt(LastViewportHeightEditorPrefKey, _viewportHeight)
+            );
+        }
 
         [MenuItem("Tools/Html To Prefab/Bake UI Resources")]
         public static void OpenWindow()
@@ -162,6 +183,9 @@ namespace HtmlToPrefab.Editor
 
             if (result.Success)
             {
+                EditorPrefs.SetString(LastHtmlPathEditorPrefKey, _htmlPath);
+                EditorPrefs.SetInt(LastViewportWidthEditorPrefKey, Mathf.Max(1, _viewportWidth));
+                EditorPrefs.SetInt(LastViewportHeightEditorPrefKey, Mathf.Max(1, _viewportHeight));
                 EditorUtility.DisplayDialog("Bake Success", result.Message, "OK");
             }
             else
